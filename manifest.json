@@ -6,7 +6,8 @@
   "permissions": [
     "activeTab",
     "clipboardRead",
-    "storage"
+    "storage",
+    "downloads"
   ],
   "host_permissions": [
     "<all_urls>"
@@ -16,6 +17,11 @@
       "matches": ["<all_urls>"],
       "js": ["src/utils/bibtex-parser.js", "src/content/content-script.js"],
       "css": ["src/content/content-styles.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://morphomuseum.com/specimenfiles/*"],
+      "js": ["src/content/morphomuseum.js"],
       "run_at": "document_idle"
     }
   ],

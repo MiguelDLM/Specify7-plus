@@ -12,7 +12,8 @@
     bibtex: true,
     doi: true,
     viewer3d: true,
-    selectAll: true
+    selectAll: true,
+    morphomuseum: true
   };
   
   // Load feature states from storage
@@ -46,6 +47,20 @@
     const typeSelect = document.querySelector('select[name="ReferenceWorkType"]');
     
     return titleField && publisherField && typeSelect;
+  }
+
+  /**
+   * Detects if we are in a Specify 7 Collection Object form
+   */
+  function isSpecifyCollectionObjectForm() {
+    // Look for any h2 containing "Collection Object"
+    const headers = Array.from(document.querySelectorAll('h2'));
+    const isColForm = headers.some(h2 => h2.textContent.includes('Collection Object'));
+    if (isColForm) return true;
+    
+    // Fallback: check for catalogNumber field
+    const catNumField = document.querySelector('input[name="catalogNumber"]');
+    return !!catNumField;
   }
   
   /**
@@ -88,6 +103,31 @@
     `;
     button.title = 'Import metadata by DOI';
     button.addEventListener('click', showDoiInputModal);
+    return button;
+  }
+  
+  /**
+   * Creates the MorphoMuseum import button
+   */
+  function createMorphoMuseumButton() {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'morpho-import-button';
+    button.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+      </svg>
+      <span>Import MorphoMuseum</span>
+    `;
+    button.title = 'Import data captured from MorphoMuseum';
+    
+    // Style the button slightly to distinguish it, Specify buttons usually have standard classes, 
+    // but this extension injects CSS in content-styles.css. For now, inline or existing classes.
+    button.classList.add('bibtex-import-button'); // Reuse bibtex button styling
+    
+    button.addEventListener('click', handleMorphoImport);
     return button;
   }
   
@@ -144,6 +184,206 @@
       console.error('Error processing BibTeX:', error);
       showMessage('Error processing BibTeX: ' + error.message, 'error');
     }
+  }
+
+  /**
+   * Handles MorphoMuseum import
+   */
+  async function handleMorphoImport() {
+    try {
+      const result = await chrome.storage.local.get(['pendingMorphoData']);
+      const data = result.pendingMorphoData;
+      
+      if (!data) {
+        showMessage('No MorphoMuseum data found in memory. Please capture from MorphoMuseum first.', 'warning');
+        return;
+      }
+      
+      fillCollectionObjectForm(data);
+      showMessage('MorphoMuseum data imported!', 'success');
+      
+      // Optionally clear data after import
+      // chrome.storage.local.remove(['pendingMorphoData']);
+      
+    } catch (error) {
+      console.error('Specify7+: Error importing MorphoMuseum data:', error);
+      showMessage('Error importing MorphoMuseum data', 'error');
+    }
+  }
+
+  /**
+   * Fills the Collection Object form with MorphoMuseum data
+   */
+  async function fillCollectionObjectForm(data) {
+    // Fill Alt Catalog Number (Always use this per user request)
+    if (data.inventoryNumber) {
+      const altCatInput = document.querySelector('input[name="altCatalogNumber"]');
+      
+      if (altCatInput) {
+        altCatInput.value = data.inventoryNumber;
+        altCatInput.dispatchEvent(new Event('input', { bubbles: true }));
+        altCatInput.dispatchEvent(new Event('change', { bubbles: true }));
+        altCatInput.classList.remove('not-touched');
+      }
+
+      // Also add to Other Identifiers subform
+      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
+      const otherIdFs = fieldsets.find(fs => {
+        const h3 = fs.querySelector('h3');
+        return h3 && /Other Identifiers\b/i.test(h3.textContent);
+      });
+
+      if (otherIdFs) {
+        let identifierInput = otherIdFs.querySelector('input[type="text"]:not([readonly])');
+        
+        if (!identifierInput) {
+          const addBtn = otherIdFs.querySelector('button[title="Add"]');
+          if (addBtn && !addBtn.disabled) {
+            addBtn.click();
+            await new Promise(r => setTimeout(r, 300));
+            identifierInput = otherIdFs.querySelector('input[type="text"]:not([readonly])');
+          }
+        }
+
+        if (identifierInput) {
+          identifierInput.value = data.inventoryNumber;
+          identifierInput.dispatchEvent(new Event('input', { bubbles: true }));
+          identifierInput.dispatchEvent(new Event('change', { bubbles: true }));
+          identifierInput.classList.remove('not-touched');
+          
+          // Optionally fill institution if there is a second input (Institution)
+          const allInputs = Array.from(otherIdFs.querySelectorAll('input[type="text"]:not([readonly])'));
+          if (allInputs.length > 1) {
+            const instInput = allInputs[1];
+            instInput.value = data.collection || "MorphoMuseum";
+            instInput.dispatchEvent(new Event('input', { bubbles: true }));
+            instInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      }
+    }
+    
+    // Attempt to fill Taxon in Determinations subform
+    if (data.genus || data.species) {
+      const taxonStr = `${data.genus || ''} ${data.species || ''}`.trim();
+      
+      // Find Determinations fieldset
+      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
+      const detFs = fieldsets.find(fs => {
+        const h3 = fs.querySelector('h3');
+        return h3 && /Determinations\b/i.test(h3.textContent);
+      });
+      
+      if (detFs) {
+        // Check if there's already a row or if we need to click "Add"
+        let taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
+                         detFs.querySelector('input[role="combobox"]');
+                         
+        if (!taxonInput) {
+          // Try to click Add button
+          const addBtn = detFs.querySelector('button[title="Add"]');
+          if (addBtn && !addBtn.disabled) {
+            addBtn.click();
+            // Wait a bit for React to render the new row
+            await new Promise(r => setTimeout(r, 300));
+            taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
+                         detFs.querySelector('input[role="combobox"]');
+          }
+        }
+        
+        if (taxonInput) {
+          taxonInput.focus();
+          taxonInput.value = taxonStr;
+          taxonInput.dispatchEvent(new Event('input', { bubbles: true }));
+          taxonInput.dispatchEvent(new Event('change', { bubbles: true }));
+          taxonInput.classList.remove('not-touched');
+        } else {
+          // Last resort fallback
+          const altTaxon = document.querySelector('input[name*="taxon"]');
+          if (altTaxon) {
+            altTaxon.value = taxonStr;
+            altTaxon.dispatchEvent(new Event('input', { bubbles: true }));
+            altTaxon.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+      }
+    }
+
+    // Locality / Origin
+    if (data.origin) {
+      const locInput = document.querySelector('input[role="combobox"][title*="Locality Name"]');
+      if (locInput) {
+        locInput.value = data.origin;
+        locInput.dispatchEvent(new Event('input', { bubbles: true }));
+        locInput.dispatchEvent(new Event('change', { bubbles: true }));
+        locInput.classList.remove('not-touched');
+      }
+    }
+
+    // Description / Remarks
+    if (data.description) {
+      const descInput = document.querySelector('textarea[name*="description"], textarea[name*="remarks"], input[name*="description"]');
+      if (descInput) {
+        descInput.value = data.description;
+        descInput.dispatchEvent(new Event('input', { bubbles: true }));
+        descInput.dispatchEvent(new Event('change', { bubbles: true }));
+        descInput.classList.remove('not-touched');
+      }
+    }
+
+    // Sex and Age (Col Obj Attribute)
+    if (data.sex || data.age) {
+      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
+      const attrFs = fieldsets.find(fs => {
+        const h3 = fs.querySelector('h3');
+        return h3 && /Col Obj Attribute\b/i.test(h3.textContent);
+      });
+      
+      if (attrFs) {
+        let sexInput = attrFs.querySelector('input[name*="sex"i], select[name*="sex"i]');
+        let ageInput = attrFs.querySelector('input[name*="age"i], select[name*="age"i]');
+        
+        if (!sexInput && !ageInput) {
+          const addBtn = attrFs.querySelector('button[title="Add"]');
+          if (addBtn && !addBtn.disabled) {
+            addBtn.click();
+            await new Promise(r => setTimeout(r, 300));
+            sexInput = attrFs.querySelector('input[name*="sex"i], select[name*="sex"i]');
+            ageInput = attrFs.querySelector('input[name*="age"i], select[name*="age"i]');
+          }
+        }
+        
+        if (sexInput && data.sex) {
+          sexInput.value = data.sex;
+          sexInput.dispatchEvent(new Event('input', { bubbles: true }));
+          sexInput.dispatchEvent(new Event('change', { bubbles: true }));
+          sexInput.classList.remove('not-touched');
+        }
+        if (ageInput && data.age) {
+          ageInput.value = data.age;
+          ageInput.dispatchEvent(new Event('input', { bubbles: true }));
+          ageInput.dispatchEvent(new Event('change', { bubbles: true }));
+          ageInput.classList.remove('not-touched');
+        }
+      } else {
+        // Fallback global search
+        const setFieldValue = (name, value) => {
+          if (!value) return;
+          const input = document.querySelector(`input[name*="${name}"i], select[name*="${name}"i]`);
+          if (input) {
+            input.value = value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.classList.remove('not-touched');
+          }
+        };
+        setFieldValue('sex', data.sex);
+        setFieldValue('age', data.age);
+      }
+    }
+    
+    // We can also try to map other fields if they exist on the form, but forms vary.
+    // E.g., 'Collection' -> might map to 'projectNumber' or similar, but let's stick to basics.
   }
 
   /**
@@ -500,40 +740,59 @@
   }
   
   /**
-   * Adds the button to the form
+   * Adds buttons to the form depending on type
    */
-  function addButtonToForm() {
-    if (document.querySelector('.bibtex-import-button') || document.querySelector('.doi-import-button')) {
-      return; // Already exists
+  function addButtonsToForm() {
+    const isRefForm = isSpecifyReferenceForm();
+    const isColForm = isSpecifyCollectionObjectForm();
+    
+    if (!isRefForm && !isColForm) return;
+
+    // Try multiple possible toolbars
+    const modalToolbar = document.querySelector('.flex.gap-2.justify-end');
+    const roleToolbar = document.querySelector('[role="toolbar"]');
+    
+    const buttonContainer = modalToolbar || roleToolbar;
+
+    if (isRefForm && buttonContainer) {
+      const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
+      if (!document.querySelector('.bibtex-import-button') && enabledFeatures.bibtex !== false) {
+        const bibtexButton = createBibtexButton();
+        buttonContainer.insertBefore(bibtexButton, firstButton || null);
+      }
+      
+      if (!document.querySelector('.doi-import-button') && enabledFeatures.doi !== false) {
+        const doiButton = createDoiButton();
+        buttonContainer.insertBefore(doiButton, firstButton || null);
+      }
     }
     
-    // Look for the button container at the end of the modal
-    const buttonContainer = document.querySelector('.flex.gap-2.justify-end');
-    
-    if (buttonContainer) {
-      const firstButton = buttonContainer.querySelector('button');
-      
-      // Add BibTeX button if enabled
-      if (enabledFeatures.bibtex !== false) {
-        const bibtexButton = createBibtexButton();
-        if (firstButton) {
-          buttonContainer.insertBefore(bibtexButton, firstButton);
+    if (isColForm) {
+      if (!document.querySelector('.morpho-import-button') && enabledFeatures.morphomuseum !== false) {
+        const morphoButton = createMorphoMuseumButton();
+        
+        if (buttonContainer) {
+          const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
+          buttonContainer.insertBefore(morphoButton, firstButton || null);
+          console.log('Specify7+: MorphoMuseum Import button added to toolbar');
         } else {
-          buttonContainer.appendChild(bibtexButton);
+          // Fallback: inject at the top of the form grid near catalogNumber
+          const catNumInput = document.querySelector('input[name="catalogNumber"]');
+          if (catNumInput) {
+            const gridContainer = catNumInput.closest('.grid');
+            if (gridContainer) {
+              const btnWrapper = document.createElement('div');
+              btnWrapper.style.gridColumn = '1 / -1'; // span full width
+              btnWrapper.style.display = 'flex';
+              btnWrapper.style.justifyContent = 'flex-end';
+              btnWrapper.style.paddingBottom = '10px';
+              btnWrapper.appendChild(morphoButton);
+              gridContainer.insertBefore(btnWrapper, gridContainer.firstChild);
+              console.log('Specify7+: MorphoMuseum Import button added to form grid');
+            }
+          }
         }
       }
-      
-      // Add DOI button if enabled
-      if (enabledFeatures.doi !== false) {
-        const doiButton = createDoiButton();
-        if (firstButton) {
-          buttonContainer.insertBefore(doiButton, firstButton);
-        } else {
-          buttonContainer.appendChild(doiButton);
-        }
-      }
-      
-      console.log('Specify7+: Import buttons added');
     }
   }
   
@@ -542,8 +801,8 @@
    */
   function observeFormChanges() {
     const observer = new MutationObserver((mutations) => {
-      if (isSpecifyReferenceForm()) {
-        addButtonToForm();
+      if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
+        addButtonsToForm();
       }
     });
     
@@ -745,8 +1004,8 @@
   // Initialize
   function init() {
     // Check if the form is already there
-    if (isSpecifyReferenceForm()) {
-      addButtonToForm();
+    if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
+      addButtonsToForm();
     }
     
     // Observe changes
