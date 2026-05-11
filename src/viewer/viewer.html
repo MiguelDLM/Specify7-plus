@@ -4,7 +4,20 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Visor 3D - Specify 7</title>
+    <!-- 3DHOP Styles -->
+    <link rel="stylesheet" href="../../lib/3dhop/stylesheet/3dhop.css">
+    <!-- Extension Styles -->
     <link rel="stylesheet" href="viewer.css">
+    
+    <!-- 3DHOP Dependencies (must be non-module for compatibility) -->
+    <script src="../../lib/3dhop/js/jquery.js"></script>
+    <script src="../../lib/3dhop/js/spidergl.js"></script>
+    <script src="../../lib/3dhop/js/nexus.js"></script>
+    <script src="../../lib/3dhop/js/presenter.js"></script>
+    <script src="../../lib/3dhop/js/init.js"></script>
+    <script src="../../lib/3dhop/js/trackball_sphere.js"></script>
+    <script src="../../lib/3dhop/js/helpers.js"></script>
+    <script src="../../lib/3dhop/js/corto.js"></script>
 </head>
 <body>
     <div id="header">
@@ -18,78 +31,26 @@
                 </svg>
                 Download
             </button>
-            <button id="wireframe-btn" title="Toggle Wireframe">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                    <line x1="12" y1="22.08" x2="12" y2="12"></line>
-                </svg>
-                Wireframe
-            </button>
-            <button id="fitview-btn" title="Fit view to model">
-                Fit view
-            </button>
-    </div>
-
-    <!-- Settings panel for lighting & material -->
-    <div id="settings-panel" aria-hidden="true">
-        <h3>Appearance</h3>
-        <label>
-            Preset
-            <select id="preset-select">
-                <option value="fossil">Fossil (matte bone)</option>
-                <option value="polished">Polished (gloss)</option>
-                <option value="metallic">Metallic</option>
-                <option value="default">Default</option>
-            </select>
-        </label>
-
-        <label>
-            Color
-            <input type="color" id="material-color" value="#ffffff">
-        </label>
-
-        <label>
-            Roughness
-            <input type="range" id="material-roughness" min="0" max="1" step="0.01" value="0.4">
-        </label>
-
-        <label>
-            Metalness
-            <input type="range" id="material-metalness" min="0" max="1" step="0.01" value="0.0">
-        </label>
-
-        <fieldset class="dir-light-fieldset">
-            <legend class="dir-light-legend">Key light (directional)</legend>
-            <label>
-                Intensity
-                <input type="range" id="dir-light-intensity" min="0" max="5" step="0.1" value="0.8">
-            </label>
-            <label>
-                Color
-                <input type="color" id="dir-light-color" value="#ffffff">
-            </label>
-            <label>
-                Azimuth (deg)
-                <input type="range" id="dir-light-azimuth" min="-180" max="180" step="1" value="45">
-            </label>
-            <label>
-                Elevation (deg)
-                <input type="range" id="dir-light-elevation" min="-90" max="90" step="1" value="30">
-            </label>
-        </fieldset>
-
-        <label>
-            Fill light intensity
-            <input type="range" id="point-light-intensity" min="0" max="2" step="0.05" value="0.3">
-        </label>
-
-        <button id="reset-appearance">Reset</button>
-    </div>
         </div>
     </div>
-    
-    <div id="viewer-container"></div>
+
+    <!-- Híbrid Viewer Container -->
+    <div id="viewer-wrapper">
+        <!-- 3DHOP Container (Used for Nexus/PLY) -->
+        <div id="3dhop" class="tdhop" style="display:none;">
+            <div id="toolbar">
+                <img id="home"     title="Home"                  src="../../lib/3dhop/skins/dark/home.png" onclick="actionsToolbar('home')"/><br/>
+                <img id="zoomin"   title="Zoom In"               src="../../lib/3dhop/skins/dark/zoomin.png" onclick="actionsToolbar('zoomin')"/><br/>
+                <img id="zoomout"  title="Zoom Out"              src="../../lib/3dhop/skins/dark/zoomout.png" onclick="actionsToolbar('zoomout')"/><br/>
+                <img id="light"    title="Disable Light Control" src="../../lib/3dhop/skins/dark/light.png" onclick="actionsToolbar('light')"/><br/>
+                <img id="full"     title="Enter Fullscreen"      src="../../lib/3dhop/skins/dark/full.png" onclick="actionsToolbar('full')"/><br/>
+            </div>
+            <canvas id="draw-canvas"></canvas>
+        </div>
+
+        <!-- Three.js Container (Used for STL/OBJ/GLTF) -->
+        <div id="threejs-container"></div>
+    </div>
     
     <div id="loading">
         <div class="spinner"></div>
@@ -106,7 +67,7 @@
         <p id="error-message"></p>
     </div>
 
-    <!-- Load viewer as an ES module (it imports three.module and JSM loaders) -->
+    <!-- Load viewer engine logic as an ES module -->
     <script type="module" src="viewer.js"></script>
 </body>
 </html>

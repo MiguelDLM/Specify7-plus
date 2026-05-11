@@ -46,7 +46,10 @@
         "lib/three/jsm/STLLoader.js",
         "lib/three/jsm/OBJLoader.js",
         "lib/three/jsm/PLYLoader.js",
-        "lib/three/jsm/OrbitControls.js"
+        "lib/three/jsm/OrbitControls.js",
+        "lib/3dhop/js/*.js",
+        "lib/3dhop/stylesheet/*.css",
+        "lib/3dhop/skins/dark/*.png"
       ],
       "matches": ["<all_urls>"]
     }
