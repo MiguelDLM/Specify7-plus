@@ -68,8 +68,8 @@
 
   function createFloatingButton() {
     const button = document.createElement('button');
-    button.textContent = 'Send to Specify';
-    button.title = 'Capture data and download 3D model for Specify 7';
+    button.textContent = 'Copy Specimen Data';
+    button.title = 'Copy data to clipboard for Specify 7';
     
     // Style the button
     Object.assign(button.style, {
@@ -108,28 +108,61 @@
         return;
       }
 
-      // Save to local storage for Specify to pick up
-      await chrome.storage.local.set({ pendingMorphoData: data });
+      // Copy to clipboard as JSON with a signature
+      const clipboardData = {
+        _source: 'Specify7+',
+        _type: 'SpecimenData',
+        ...data
+      };
       
+      await navigator.clipboard.writeText(JSON.stringify(clipboardData));
+
+      // Save to storage so other tabs know what data is available
+      if (chrome && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ lastCapturedSpecimen: clipboardData });
+      }
+      
+      // Visual feedback
+      const originalText = this.textContent;
+      this.textContent = '✅ Copied!';
+      this.style.backgroundColor = '#059669';
+      setTimeout(() => {
+        this.textContent = originalText;
+        this.style.backgroundColor = '#2563eb';
+      }, 2000);
+
       // Trigger download if available
       if (data.modelUrl) {
         window.open(data.modelUrl, '_blank');
-        alert('Specify7+: Data captured successfully! Download started.\\nYou can now go to Specify 7 and click "Import MorphoMuseum".');
-      } else {
-        alert('Specify7+: Data captured successfully! (No 3D model found)\\nYou can now go to Specify 7 and click "Import MorphoMuseum".');
       }
 
     } catch (error) {
       console.error('Specify7+: Error capturing data:', error);
-      alert('Specify7+: Error capturing data. See console for details.');
+      alert('Specify7+: Error copying data. Please ensure the page has focus.');
     }
   }
 
   // Initialize
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', createFloatingButton);
+  if (chrome && chrome.storage && chrome.storage.sync) {
+    chrome.storage.sync.get(['enabledFeatures'], (result) => {
+      const features = result.enabledFeatures || { dataCapture: true };
+      if (features.dataCapture !== false) {
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', createFloatingButton);
+        } else {
+          createFloatingButton();
+        }
+      } else {
+        console.log('Specify7+: Data capture is disabled in settings');
+      }
+    });
   } else {
-    createFloatingButton();
+    // Fallback if storage not available
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', createFloatingButton);
+    } else {
+      createFloatingButton();
+    }
   }
 
 })();

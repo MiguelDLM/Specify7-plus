@@ -23,6 +23,11 @@
       "matches": ["*://morphomuseum.com/specimenfiles/*"],
       "js": ["src/content/morphomuseum.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.morphosource.org/*"],
+      "js": ["src/content/morphosource.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

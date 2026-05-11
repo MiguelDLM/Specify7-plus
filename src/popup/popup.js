@@ -5,7 +5,8 @@ const DEFAULT_FEATURES = {
   bibtex: true,
   doi: true,
   viewer3d: true,
-  selectAll: true
+  selectAll: true,
+  dataCapture: true
 };
 
 // Load saved feature states
@@ -20,6 +21,7 @@ function loadFeatureStates() {
       document.getElementById('feature-doi').checked = features.doi !== false;
       document.getElementById('feature-3dviewer').checked = features.viewer3d !== false;
       document.getElementById('feature-selectall').checked = features.selectAll !== false;
+      document.getElementById('feature-capture').checked = features.dataCapture !== false;
     });
   }
 }
@@ -30,7 +32,8 @@ function saveFeatureStates() {
     bibtex: document.getElementById('feature-bibtex').checked,
     doi: document.getElementById('feature-doi').checked,
     viewer3d: document.getElementById('feature-3dviewer').checked,
-    selectAll: document.getElementById('feature-selectall').checked
+    selectAll: document.getElementById('feature-selectall').checked,
+    dataCapture: document.getElementById('feature-capture').checked
   };
   
   console.log('popup.js: saving feature states', features);
@@ -64,4 +67,5 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('feature-doi').addEventListener('change', saveFeatureStates);
   document.getElementById('feature-3dviewer').addEventListener('change', saveFeatureStates);
   document.getElementById('feature-selectall').addEventListener('change', saveFeatureStates);
+  document.getElementById('feature-capture').addEventListener('change', saveFeatureStates);
 });

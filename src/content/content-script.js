@@ -13,20 +13,52 @@
     doi: true,
     viewer3d: true,
     selectAll: true,
-    morphomuseum: true
-  };
-  
-  // Load feature states from storage
-  function loadFeatureStates() {
-    if (chrome && chrome.storage && chrome.storage.sync) {
-      chrome.storage.sync.get(['enabledFeatures'], (result) => {
-        if (result && result.enabledFeatures) {
-          enabledFeatures = result.enabledFeatures;
-          console.log('Specify7+: Feature states loaded', enabledFeatures);
-        }
-      });
+    morphosource: true
+    };
+
+    // Keep track of the last captured data to know which buttons to show
+    let lastCapturedData = null;
+
+    // Load feature states and last captured data from storage
+    function loadFeatureStates() {
+    if (chrome && chrome.storage) {
+      // Load enabled features
+      if (chrome.storage.sync) {
+        chrome.storage.sync.get(['enabledFeatures'], (result) => {
+          if (result && result.enabledFeatures) {
+            enabledFeatures = result.enabledFeatures;
+            console.log('Specify7+: Feature states loaded', enabledFeatures);
+          }
+        });
+      }
+
+      // Load last captured specimen data
+      if (chrome.storage.local) {
+        chrome.storage.local.get(['lastCapturedSpecimen'], (result) => {
+          if (result && result.lastCapturedSpecimen) {
+            lastCapturedData = result.lastCapturedSpecimen;
+            // Refresh buttons if form is already open
+            if (isSpecifyCollectionObjectForm()) {
+              addPasteButtonsToAllFields();
+            }
+          }
+        });
+
+        // Listen for updates from other tabs
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area === 'local' && changes.lastCapturedSpecimen) {
+            lastCapturedData = changes.lastCapturedSpecimen.newValue;
+            if (isSpecifyCollectionObjectForm()) {
+              // Remove old buttons and add new ones based on new data
+              document.querySelectorAll('.field-paste-btn').forEach(b => b.remove());
+              document.querySelectorAll('[data-has-paste-btn]').forEach(i => delete i.dataset.hasPasteBtn);
+              addPasteButtonsToAllFields();
+            }
+          }
+        });
+      }
     }
-  }
+    }
   
   // Load features on startup
   loadFeatureStates();
@@ -107,28 +139,31 @@
   }
   
   /**
-   * Creates the MorphoMuseum import button
+   * Creates the unified 'Import from Clipboard' button
    */
-  function createMorphoMuseumButton() {
+  function createClipboardImportButton() {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'morpho-import-button';
+    button.className = 'clipboard-import-button';
     button.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-        <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+        <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
       </svg>
-      <span>Import MorphoMuseum</span>
+      <span>Import from Clipboard</span>
     `;
-    button.title = 'Import data captured from MorphoMuseum';
-    
-    // Style the button slightly to distinguish it, Specify buttons usually have standard classes, 
-    // but this extension injects CSS in content-styles.css. For now, inline or existing classes.
-    button.classList.add('bibtex-import-button'); // Reuse bibtex button styling
-    
-    button.addEventListener('click', handleMorphoImport);
+    button.title = 'Import specimen data from clipboard';
+    button.classList.add('bibtex-import-button');
+    button.addEventListener('click', handleClipboardImport);
     return button;
+  }
+  
+  /**
+   * Creates the MorphoSource import button
+   */
+  function createMorphoSourceButton() {
+    // Deprecated in favor of createClipboardImportButton
+    return createClipboardImportButton();
   }
   
   /**
@@ -187,43 +222,298 @@
   }
 
   /**
-   * Handles MorphoMuseum import
+   * Handles import from clipboard
    */
-  async function handleMorphoImport() {
+  async function handleClipboardImport() {
     try {
-      const result = await chrome.storage.local.get(['pendingMorphoData']);
-      const data = result.pendingMorphoData;
-      
-      if (!data) {
-        showMessage('No MorphoMuseum data found in memory. Please capture from MorphoMuseum first.', 'warning');
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) {
+        showMessage('Clipboard is empty', 'warning');
         return;
       }
-      
-      fillCollectionObjectForm(data);
-      showMessage('MorphoMuseum data imported!', 'success');
-      
-      // Optionally clear data after import
-      // chrome.storage.local.remove(['pendingMorphoData']);
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        showMessage('Clipboard does not contain valid specimen data', 'warning');
+        return;
+      }
+
+      if (data._source !== 'Specify7+' || data._type !== 'SpecimenData') {
+        showMessage('Clipboard data is not from Specify7+ capture', 'warning');
+        return;
+      }
+
+      await fillCollectionObjectForm(data);
+      showMessage('Specimen data imported from clipboard!', 'success');
       
     } catch (error) {
-      console.error('Specify7+: Error importing MorphoMuseum data:', error);
-      showMessage('Error importing MorphoMuseum data', 'error');
+      console.error('Specify7+: Error importing from clipboard:', error);
+      if (error.name === 'NotAllowedError' || error.name === 'DOMException') {
+        showMessage('Could not read clipboard. Please click on the page first to give it focus.', 'warning');
+      } else {
+        showMessage('Error reading from clipboard. Please ensure extension has permission.', 'error');
+      }
     }
   }
 
   /**
-   * Fills the Collection Object form with MorphoMuseum data
+   * Handles MorphoMuseum import (legacy support)
+   */
+  async function handleMorphoImport() {
+    return handleClipboardImport();
+  }
+
+  /**
+   * Helper to format various date strings into YYYY-MM-DD for HTML5 date inputs
+   */
+  function formatDateForInput(dateStr) {
+    if (!dateStr || dateStr === '--') return '';
+
+    // If already in YYYY-MM-DD format, return as is
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+
+    try {
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    } catch (e) {
+      // Ignore
+    }
+    return '';
+  }
+
+  /**
+   * Helper to set value in a way that React/Specify picks it up and keeps it.
+   * Uses execCommand to simulate typing, which is more reliable for autocomplete fields.
+   */
+  async function setSafeValue(input, value) {
+    if (!input || value === undefined || value === null) return;
+
+    input.focus();
+
+    // Try to use execCommand to simulate user typing - this is best for React/Specify
+    try {
+      // If it's a date input, try to format it correctly
+      if (input.type === 'date') {
+        const formattedDate = formatDateForInput(value);
+        if (formattedDate) {
+          value = formattedDate;
+        } else {
+          console.warn('Specify7+: Could not parse date format for input:', value);
+        }
+      }
+
+      input.select();
+      const success = document.execCommand('insertText', false, value);
+      if (!success) throw new Error('execCommand failed');
+    } catch (e) {
+      // Fallback to property setter
+      try {
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+        const setter = input.tagName === 'TEXTAREA' ? nativeTextAreaValueSetter : nativeInputValueSetter;
+
+        if (setter) {
+          setter.call(input, value);
+        } else {
+          input.value = value;
+        }
+      } catch (err) {
+        console.error('Specify7+: Fallback setter failed:', err);
+        input.value = value;
+      }
+    }
+
+    // Dispatch events to trigger validation
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Small delay to let React process
+    await sleep(100);
+
+    // For comboboxes, we prevent the first blur/focusout from triggering the "reset if not selected" behavior
+    // This gives the user time to go back and select a suggestion or create a new one.
+    if (input.getAttribute('role') === 'combobox') {
+      const originalValue = value;
+      const preventClearing = (e) => {
+        // Stop Specify 7 from seeing these events which usually trigger clearing
+        e.stopImmediatePropagation();
+        
+        // Remove listeners after first use
+        input.removeEventListener('blur', preventClearing, true);
+        input.removeEventListener('focusout', preventClearing, true);
+      };
+
+      // We use capture phase to get it before Specify 7's React handlers
+      input.addEventListener('blur', preventClearing, true);
+      input.addEventListener('focusout', preventClearing, true);
+
+      // Fallback: If Specify 7 STILL manages to clear it (e.g. via internal React state),
+      // we try to restore it once after a short delay.
+      setTimeout(() => {
+        if (input.value === '' && originalValue !== '') {
+          // console.log('Specify7+: Restoring cleared combobox value:', originalValue);
+          input.value = originalValue;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, 500);
+      
+      // Wait a bit longer for comboboxes to let searches initialize
+      await sleep(300);
+    } else {
+      input.dispatchEvent(new Event('blur', { bubbles: true }));
+    }
+
+    input.classList.remove('not-touched');
+  }
+
+  /**
+   * Helper to find which data key corresponds to an input
+   */
+  function findFieldKey(input) {
+    // 1. Check by name attribute
+    const name = input.getAttribute('name');
+    if (name) {
+      if (name === 'catalogNumber') return 'inventoryNumber';
+      if (name === 'altCatalogNumber') return 'inventoryNumber';
+      if (name === 'identifier') return 'inventoryNumber';
+      if (name === 'institution') return 'collection';
+      if (name === 'remarks') return 'description';
+      if (name === 'stationFieldNumber') return 'inventoryNumber';
+      if (name === 'verbatimDate') return 'dateCreated';
+    }
+    
+    // 2. Check by label
+    const label = document.querySelector(`label[for="${input.id}"]`);
+    if (label) {
+      const text = label.textContent.trim().toLowerCase();
+      // Use more specific matching to avoid false positives on generic fields
+      if (text === 'catalog number') return 'inventoryNumber';
+      if (text === 'alt cat number') return 'inventoryNumber';
+      if (text === 'identifier') return 'inventoryNumber';
+      if (text === 'institution') return 'collection';
+      if (text === 'remarks' && input.tagName === 'TEXTAREA') return 'description';
+      if (text === 'taxon') return 'taxon';
+      if (text === 'genus') return 'genus';
+      if (text === 'species') return 'species';
+      if (text === 'locality' || text === 'locality name') return 'origin';
+      if (text === 'prepared by') return 'creator';
+      if (text === 'prepared date') return 'dateCreated';
+      if (text === 'determined date') return 'dateCreated';
+      if (text === 'start date') return 'dateCreated';
+      if (text === 'cataloged date') return 'dateCreated';
+      if (text === 'method') return 'method';
+      if (text === 'count') return 'count';
+    }
+
+    // 3. Check by title (common in Specify comboboxes)
+    const title = input.getAttribute('title') || '';
+    if (title.toLowerCase().includes('locality name')) return 'origin';
+    if (title.toLowerCase().includes('full name')) return 'taxon';
+    if (title.toLowerCase().includes('prepared by')) return 'creator';
+    if (title.toLowerCase().includes('prep type')) return 'prepType';
+
+    return null;
+  }
+
+  /**
+   * Injects a small paste button next to an input
+   */
+  function injectPasteButton(input) {
+    if (input.dataset.hasPasteBtn || input.readOnly || input.disabled) return;
+    
+    const fieldKey = findFieldKey(input);
+    if (!fieldKey) return;
+
+    // Only show button if we have data for this field in lastCapturedData
+    if (!lastCapturedData) return;
+    
+    let hasData = false;
+    if (fieldKey === 'taxon') {
+      hasData = !!(lastCapturedData.genus || lastCapturedData.species);
+    } else if (fieldKey === 'inventoryNumber') {
+      hasData = !!(lastCapturedData.inventoryNumber || lastCapturedData.catalogNumber);
+    } else {
+      hasData = !!lastCapturedData[fieldKey];
+    }
+
+    if (!hasData) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'field-paste-btn';
+    btn.type = 'button';
+    btn.title = `Paste ${fieldKey} from captured data`;
+    btn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
+        <rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect>
+      </svg>
+    `;
+
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      try {
+        let valueToSet = '';
+        if (fieldKey === 'taxon') {
+          valueToSet = `${lastCapturedData.genus || ''} ${lastCapturedData.species || ''}`.trim();
+        } else if (fieldKey === 'inventoryNumber' && !lastCapturedData.inventoryNumber) {
+           valueToSet = lastCapturedData.catalogNumber || '';
+        } else {
+          valueToSet = lastCapturedData[fieldKey];
+        }
+
+        if (valueToSet) {
+          await setSafeValue(input, valueToSet);
+          btn.classList.add('success');
+          setTimeout(() => btn.classList.remove('success'), 1000);
+        }
+      } catch (err) {
+        console.error('Specify7+: Field paste failed', err);
+      }
+    });
+
+    // Insertion logic: Place inside the input wrapper whenever possible
+    const wrapper = input.parentElement;
+    if (wrapper && (wrapper.classList.contains('relative') || wrapper.classList.contains('flex'))) {
+      // If it's a combobox, we want it inside but before other buttons if possible
+      wrapper.appendChild(btn);
+    } else {
+      // Fallback for simple inputs
+      input.after(btn);
+    }
+    
+    input.dataset.hasPasteBtn = 'true';
+  }
+
+  /**
+   * Scans the form and adds paste buttons to all supported fields
+   */
+  function addPasteButtonsToAllFields() {
+    if (enabledFeatures.dataCapture === false) return;
+    
+    const inputs = document.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]), textarea, select');
+    inputs.forEach(injectPasteButton);
+  }
+
+  /**
+   * Fills the Collection Object form with Morpho/Specimen data
    */
   async function fillCollectionObjectForm(data) {
-    // Fill Alt Catalog Number (Always use this per user request)
+    // 1. Fill non-combobox fields first
+    
+    // Fill Alt Catalog Number
     if (data.inventoryNumber) {
       const altCatInput = document.querySelector('input[name="altCatalogNumber"]');
-      
       if (altCatInput) {
-        altCatInput.value = data.inventoryNumber;
-        altCatInput.dispatchEvent(new Event('input', { bubbles: true }));
-        altCatInput.dispatchEvent(new Event('change', { bubbles: true }));
-        altCatInput.classList.remove('not-touched');
+        await setSafeValue(altCatInput, data.inventoryNumber);
       }
 
       // Also add to Other Identifiers subform
@@ -235,88 +525,65 @@
 
       if (otherIdFs) {
         let identifierInput = otherIdFs.querySelector('input[type="text"]:not([readonly])');
-        
         if (!identifierInput) {
           const addBtn = otherIdFs.querySelector('button[title="Add"]');
           if (addBtn && !addBtn.disabled) {
             addBtn.click();
-            await new Promise(r => setTimeout(r, 300));
+            await sleep(300);
             identifierInput = otherIdFs.querySelector('input[type="text"]:not([readonly])');
           }
         }
 
         if (identifierInput) {
-          identifierInput.value = data.inventoryNumber;
-          identifierInput.dispatchEvent(new Event('input', { bubbles: true }));
-          identifierInput.dispatchEvent(new Event('change', { bubbles: true }));
-          identifierInput.classList.remove('not-touched');
+          await setSafeValue(identifierInput, data.inventoryNumber);
           
-          // Optionally fill institution if there is a second input (Institution)
+          // Institution / Collection
           const allInputs = Array.from(otherIdFs.querySelectorAll('input[type="text"]:not([readonly])'));
-          if (allInputs.length > 1) {
-            const instInput = allInputs[1];
-            instInput.value = data.collection || "MorphoMuseum";
-            instInput.dispatchEvent(new Event('input', { bubbles: true }));
-            instInput.dispatchEvent(new Event('change', { bubbles: true }));
-          }
-        }
-      }
-    }
-    
-    // Attempt to fill Taxon in Determinations subform
-    if (data.genus || data.species) {
-      const taxonStr = `${data.genus || ''} ${data.species || ''}`.trim();
-      
-      // Find Determinations fieldset
-      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
-      const detFs = fieldsets.find(fs => {
-        const h3 = fs.querySelector('h3');
-        return h3 && /Determinations\b/i.test(h3.textContent);
-      });
-      
-      if (detFs) {
-        // Check if there's already a row or if we need to click "Add"
-        let taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
-                         detFs.querySelector('input[role="combobox"]');
-                         
-        if (!taxonInput) {
-          // Try to click Add button
-          const addBtn = detFs.querySelector('button[title="Add"]');
-          if (addBtn && !addBtn.disabled) {
-            addBtn.click();
-            // Wait a bit for React to render the new row
-            await new Promise(r => setTimeout(r, 300));
-            taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
-                         detFs.querySelector('input[role="combobox"]');
-          }
-        }
-        
-        if (taxonInput) {
-          taxonInput.focus();
-          taxonInput.value = taxonStr;
-          taxonInput.dispatchEvent(new Event('input', { bubbles: true }));
-          taxonInput.dispatchEvent(new Event('change', { bubbles: true }));
-          taxonInput.classList.remove('not-touched');
-        } else {
-          // Last resort fallback
-          const altTaxon = document.querySelector('input[name*="taxon"]');
-          if (altTaxon) {
-            altTaxon.value = taxonStr;
-            altTaxon.dispatchEvent(new Event('input', { bubbles: true }));
-            altTaxon.dispatchEvent(new Event('change', { bubbles: true }));
+          if (allInputs.length > 1 && data.collection) {
+            await setSafeValue(allInputs[1], data.collection);
           }
         }
       }
     }
 
-    // Locality / Origin
-    if (data.origin) {
-      const locInput = document.querySelector('input[role="combobox"][title*="Locality Name"]');
-      if (locInput) {
-        locInput.value = data.origin;
-        locInput.dispatchEvent(new Event('input', { bubbles: true }));
-        locInput.dispatchEvent(new Event('change', { bubbles: true }));
-        locInput.classList.remove('not-touched');
+    // Preparations Subform - Date and Type (Select/Date are safer than comboboxes)
+    if (data.dateCreated) {
+      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
+      const prepFs = fieldsets.find(fs => {
+        const h3 = fs.querySelector('h3');
+        return h3 && /Preparations\b/i.test(h3.textContent);
+      });
+
+      if (prepFs) {
+        let prepTypeSelect = prepFs.querySelector('select[name*="prepType"], select');
+        let preparedDateInput = prepFs.querySelector('input[name*="preparedDate"], input[type="date"]');
+
+        if (!prepTypeSelect) {
+          const addBtn = prepFs.querySelector('button[title="Add"]');
+          if (addBtn && !addBtn.disabled) {
+            addBtn.click();
+            await sleep(300);
+            prepTypeSelect = prepFs.querySelector('select[name*="prepType"], select');
+            preparedDateInput = prepFs.querySelector('input[name*="preparedDate"], input[type="date"]');
+          }
+        }
+
+        if (prepTypeSelect) {
+          const option3d = Array.from(prepTypeSelect.options).find(opt => 
+            opt.text.toLowerCase().includes('3d') || opt.value.toLowerCase().includes('3d')
+          );
+          if (option3d) {
+            prepTypeSelect.value = option3d.value;
+            prepTypeSelect.dispatchEvent(new Event('input', { bubbles: true }));
+            prepTypeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            prepTypeSelect.blur();
+            await sleep(200);
+          }
+        }
+
+        if (preparedDateInput) {
+          await setSafeValue(preparedDateInput, data.dateCreated);
+        }
       }
     }
 
@@ -324,66 +591,63 @@
     if (data.description) {
       const descInput = document.querySelector('textarea[name*="description"], textarea[name*="remarks"], input[name*="description"]');
       if (descInput) {
-        descInput.value = data.description;
-        descInput.dispatchEvent(new Event('input', { bubbles: true }));
-        descInput.dispatchEvent(new Event('change', { bubbles: true }));
-        descInput.classList.remove('not-touched');
+        await setSafeValue(descInput, data.description);
       }
     }
 
-    // Sex and Age (Col Obj Attribute)
-    if (data.sex || data.age) {
-      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
-      const attrFs = fieldsets.find(fs => {
-        const h3 = fs.querySelector('h3');
-        return h3 && /Col Obj Attribute\b/i.test(h3.textContent);
-      });
-      
-      if (attrFs) {
-        let sexInput = attrFs.querySelector('input[name*="sex"i], select[name*="sex"i]');
-        let ageInput = attrFs.querySelector('input[name*="age"i], select[name*="age"i]');
-        
-        if (!sexInput && !ageInput) {
-          const addBtn = attrFs.querySelector('button[title="Add"]');
-          if (addBtn && !addBtn.disabled) {
-            addBtn.click();
-            await new Promise(r => setTimeout(r, 300));
-            sexInput = attrFs.querySelector('input[name*="sex"i], select[name*="sex"i]');
-            ageInput = attrFs.querySelector('input[name*="age"i], select[name*="age"i]');
-          }
-        }
-        
-        if (sexInput && data.sex) {
-          sexInput.value = data.sex;
-          sexInput.dispatchEvent(new Event('input', { bubbles: true }));
-          sexInput.dispatchEvent(new Event('change', { bubbles: true }));
-          sexInput.classList.remove('not-touched');
-        }
-        if (ageInput && data.age) {
-          ageInput.value = data.age;
-          ageInput.dispatchEvent(new Event('input', { bubbles: true }));
-          ageInput.dispatchEvent(new Event('change', { bubbles: true }));
-          ageInput.classList.remove('not-touched');
-        }
-      } else {
-        // Fallback global search
-        const setFieldValue = (name, value) => {
-          if (!value) return;
-          const input = document.querySelector(`input[name*="${name}"i], select[name*="${name}"i]`);
-          if (input) {
-            input.value = value;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            input.classList.remove('not-touched');
-          }
-        };
-        setFieldValue('sex', data.sex);
-        setFieldValue('age', data.age);
+    // 2. Fill comboboxes LAST to keep them active and prevent them from being cleared by subsequent focus changes
+
+    // Locality / Origin
+    if (data.origin) {
+      const locInput = document.querySelector('input[role="combobox"][title*="Locality Name"]');
+      if (locInput) {
+        await setSafeValue(locInput, data.origin);
       }
     }
-    
-    // We can also try to map other fields if they exist on the form, but forms vary.
-    // E.g., 'Collection' -> might map to 'projectNumber' or similar, but let's stick to basics.
+
+    // Prepared By (Combobox)
+    if (data.creator) {
+      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
+      const prepFs = fieldsets.find(fs => {
+        const h3 = fs.querySelector('h3');
+        return h3 && /Preparations\b/i.test(h3.textContent);
+      });
+      if (prepFs) {
+        const preparedByInput = prepFs.querySelector('input[name*="preparedBy"], input[role="combobox"]');
+        if (preparedByInput) {
+          await setSafeValue(preparedByInput, data.creator);
+        }
+      }
+    }
+
+    // Taxonomy (Combobox) - Usually the most sensitive, fill absolute last
+    if (data.genus || data.species) {
+      const taxonStr = `${data.genus || ''} ${data.species || ''}`.trim();
+      const fieldsets = Array.from(document.querySelectorAll('fieldset'));
+      const detFs = fieldsets.find(fs => {
+        const h3 = fs.querySelector('h3');
+        return h3 && /Determinations\b/i.test(h3.textContent);
+      });
+      
+      if (detFs) {
+        let taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
+                         detFs.querySelector('input[role="combobox"]');
+                         
+        if (!taxonInput) {
+          const addBtn = detFs.querySelector('button[title="Add"]');
+          if (addBtn && !addBtn.disabled) {
+            addBtn.click();
+            await sleep(300);
+            taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
+                         detFs.querySelector('input[role="combobox"]');
+          }
+        }
+        
+        if (taxonInput) {
+          await setSafeValue(taxonInput, taxonStr);
+        }
+      }
+    }
   }
 
   /**
@@ -768,30 +1032,32 @@
     }
     
     if (isColForm) {
-      if (!document.querySelector('.morpho-import-button') && enabledFeatures.morphomuseum !== false) {
-        const morphoButton = createMorphoMuseumButton();
+      if (!document.querySelector('.clipboard-import-button')) {
+        const clipboardButton = createClipboardImportButton();
         
         if (buttonContainer) {
           const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
-          buttonContainer.insertBefore(morphoButton, firstButton || null);
-          console.log('Specify7+: MorphoMuseum Import button added to toolbar');
+          buttonContainer.insertBefore(clipboardButton, firstButton || null);
         } else {
-          // Fallback: inject at the top of the form grid near catalogNumber
-          const catNumInput = document.querySelector('input[name="catalogNumber"]');
-          if (catNumInput) {
-            const gridContainer = catNumInput.closest('.grid');
-            if (gridContainer) {
-              const btnWrapper = document.createElement('div');
-              btnWrapper.style.gridColumn = '1 / -1'; // span full width
-              btnWrapper.style.display = 'flex';
-              btnWrapper.style.justifyContent = 'flex-end';
-              btnWrapper.style.paddingBottom = '10px';
-              btnWrapper.appendChild(morphoButton);
-              gridContainer.insertBefore(btnWrapper, gridContainer.firstChild);
-              console.log('Specify7+: MorphoMuseum Import button added to form grid');
-            }
-          }
+          injectButtonAtTop(clipboardButton);
         }
+      }
+    }
+  }
+
+  function injectButtonAtTop(button) {
+    const catNumInput = document.querySelector('input[name="catalogNumber"]');
+    if (catNumInput) {
+      const gridContainer = catNumInput.closest('.grid');
+      if (gridContainer) {
+        const btnWrapper = document.createElement('div');
+        btnWrapper.style.gridColumn = '1 / -1';
+        btnWrapper.style.display = 'flex';
+        btnWrapper.style.justifyContent = 'flex-end';
+        btnWrapper.style.paddingBottom = '10px';
+        btnWrapper.style.gap = '8px';
+        btnWrapper.appendChild(button);
+        gridContainer.insertBefore(btnWrapper, gridContainer.firstChild);
       }
     }
   }
@@ -803,15 +1069,15 @@
     const observer = new MutationObserver((mutations) => {
       if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
         addButtonsToForm();
+        addPasteButtonsToAllFields();
       }
     });
-    
+
     observer.observe(document.body, {
       childList: true,
       subtree: true
     });
   }
-
   /**
    * Intercepts clicks on 3D model links (.stl, .obj, .gltf, .glb files)
    * and opens them in the custom 3D viewer instead of downloading
@@ -1006,6 +1272,7 @@
     // Check if the form is already there
     if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
       addButtonsToForm();
+      addPasteButtonsToAllFields();
     }
     
     // Observe changes

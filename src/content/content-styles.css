@@ -349,3 +349,58 @@
     color: #dbeafe;
   }
 }
+
+/* Field-specific paste buttons */
+.field-paste-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  padding: 0;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  color: #4b5563;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.field-paste-btn:hover {
+  background: #e5e7eb;
+  color: #111827;
+  border-color: #9ca3af;
+  transform: scale(1.1);
+}
+
+.field-paste-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.field-paste-btn.success {
+  background: #10b981;
+  color: white;
+  border-color: #059669;
+}
+
+/* Position adjustment for specific Specify 7 layouts */
+.relative > .field-paste-btn {
+  position: absolute;
+  right: 1.8em;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+}
+
+.relative > .field-paste-btn:hover {
+  transform: translateY(-50%) scale(1.1);
+}
+
+/* If there is already an expand button (combobox), move ours slightly to the left */
+.relative > input[role="combobox"] + button + .field-paste-btn {
+  right: 3.2em;
+}
