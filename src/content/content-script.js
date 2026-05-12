@@ -1098,10 +1098,11 @@
       const lowerUrl = url.toLowerCase();
       
       // Check if it's a 3D model file
-      const is3DModel = lowerUrl.endsWith('.stl') || 
-                        lowerUrl.endsWith('.obj') || 
-                        lowerUrl.endsWith('.gltf') || 
-                        lowerUrl.endsWith('.glb');
+      const is3DModel = lowerUrl.endsWith('.stl') ||
+                        lowerUrl.endsWith('.obj') ||
+                        lowerUrl.endsWith('.gltf') ||
+                        lowerUrl.endsWith('.glb') ||
+                        lowerUrl.endsWith('.ply');
       
       if (!is3DModel) return;
       
