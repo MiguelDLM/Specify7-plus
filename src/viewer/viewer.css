@@ -1,139 +1,398 @@
+/* ============================================================
+   Specify7+ 3D Viewer — Inspired by UMORF viewer aesthetic
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: #000000;
-    color: #ffffff;
+:root {
+    --bg: #00274c;
+    --accent: #ffcb05;
+    --accent2: #587abc;
+    --ui-bg: rgba(0, 0, 0, 0.72);
+    --ui-border: rgba(255, 255, 255, 0.12);
+    --text: #e8e8e8;
+    --text-dim: #9aa3b0;
+    --radius: 8px;
+    --font: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+
+html, body {
+    width: 100%;
+    height: 100%;
     overflow: hidden;
-    height: 100vh;
+    background: var(--bg);
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--text);
+}
+
+/* ── Three.js canvas ── */
+#threejs-container {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* ── Measure hint (top-left) ── */
+#measure-hint {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 200;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--radius);
+    padding: 10px 13px;
+    line-height: 1.7;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    pointer-events: none;
+    user-select: none;
+}
+
+.key-s b { color: var(--accent); }
+.key-e b { color: var(--accent2); }
+
+/* ── Settings panel (top-right, dat.GUI style) ── */
+#settings-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    z-index: 200;
+    width: 220px;
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--radius);
+    padding: 12px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     display: flex;
     flex-direction: column;
+    gap: 10px;
 }
 
-#header {
-    background: #111111;
-    padding: 0.75rem 1.5rem;
+.settings-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 2px;
+}
+
+.setting-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.setting-group > label {
+    font-size: 11px;
+    color: var(--text-dim);
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid #333;
-    z-index: 100;
 }
 
-#model-title {
-    font-size: 1.2rem;
-    font-weight: 500;
-    color: #e0e0e0;
-}
-
-#controls {
+/* Background swatches */
+#bg-swatches {
     display: flex;
-    gap: 0.5rem;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 2px;
 }
 
-#download-btn {
-    background: #333;
-    border: 1px solid #444;
-    color: #ffffff;
-    padding: 0.4rem 0.8rem;
-    border-radius: 4px;
+.swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: 5px;
+    border: 2px solid transparent;
     cursor: pointer;
-    display: flex;
+    transition: transform 0.15s, border-color 0.15s;
+}
+
+.swatch:hover { transform: scale(1.15); }
+.swatch.active { border-color: var(--accent) !important; }
+
+/* Range sliders */
+input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 6px rgba(255, 203, 5, 0.5);
+    cursor: pointer;
+    transition: box-shadow 0.15s;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 10px rgba(255, 203, 5, 0.9);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--accent);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+/* Toggle switch */
+.setting-group:has(.toggle-switch) {
+    flex-direction: row;
+    justify-content: space-between;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 0.85rem;
-    transition: all 0.2s;
 }
 
-#download-btn:hover {
-    background: #444;
+.setting-group:has(.toggle-switch) > label:first-child {
+    display: block;
+    color: var(--text-dim);
 }
 
-/* Híbrid Container */
-#viewer-wrapper {
-    flex: 1;
+.toggle-switch {
     position: relative;
-    background: #000000;
-}
-
-#threejs-container {
-    width: 100%;
-    height: 100%;
-}
-
-/* 3DHOP Canvas & Toolbar */
-#draw-canvas {
-    width: 100%;
-    height: 100%;
-    background: #000;
-}
-
-#toolbar {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    background: rgba(0, 0, 0, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 5px;
-    z-index: 50;
-}
-
-#toolbar img {
-    width: 32px;
-    height: 32px;
-    margin: 5px;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
     cursor: pointer;
-    opacity: 0.7;
-    transition: opacity 0.2s;
 }
 
-#toolbar img:hover {
-    opacity: 1;
+.toggle-switch input { display: none; }
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: rgba(255,255,255,0.15);
+    border-radius: 10px;
+    transition: background 0.2s;
 }
 
-/* Loading & Error */
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    width: 16px;
+    height: 16px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--accent2);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+}
+
+.settings-divider {
+    border: none;
+    border-top: 1px solid var(--ui-border);
+    margin: 2px 0;
+}
+
+/* Action buttons in settings */
+#settings-panel button {
+    width: 100%;
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--ui-border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+#settings-panel button:hover {
+    background: rgba(255,255,255,0.16);
+    border-color: rgba(255,255,255,0.3);
+}
+
+/* ── Measurement result badge (center-bottom) ── */
+#measure-result {
+    position: absolute;
+    bottom: 50px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    background: rgba(0,0,0,0.82);
+    border: 1px solid var(--accent);
+    border-radius: 30px;
+    padding: 8px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    backdrop-filter: blur(8px);
+    animation: fadeIn 0.3s ease;
+}
+
+#measure-result.hidden { display: none; }
+
+#measure-distance {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.03em;
+}
+
+#clear-measure-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 2px;
+    transition: color 0.15s;
+}
+
+#clear-measure-btn:hover { color: white; }
+
+/* ── Measure dot markers ── */
+.measure-dot {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid white;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 300;
+    box-shadow: 0 0 6px rgba(0,0,0,0.6);
+}
+
+.measure-dot.hidden { display: none; }
+.dot-start { background: var(--accent); }
+.dot-end { background: var(--accent2); }
+
+/* ── Loading overlay ── */
 #loading {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
-    z-index: 10;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    z-index: 500;
+    background: var(--bg);
+    transition: opacity 0.4s;
 }
 
-#loading.hidden { display: none; }
+#loading.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
 
-.spinner {
-    width: 40px;
-    height: 40px;
-    margin: 0 auto 1rem;
-    border: 3px solid rgba(255, 255, 255, 0.1);
-    border-top: 3px solid #667eea;
+.spinner-ring {
+    width: 52px;
+    height: 52px;
+    border: 4px solid rgba(255, 203, 5, 0.15);
+    border-top: 4px solid var(--accent);
     border-radius: 50%;
-    animation: spin 1s linear infinite;
+    animation: spin 0.9s linear infinite;
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+    to { transform: rotate(360deg); }
 }
 
+#loading-label {
+    color: var(--text-dim);
+    font-size: 13px;
+    letter-spacing: 0.04em;
+}
+
+/* ── Error overlay ── */
 #error {
     position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    text-align: center;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    z-index: 500;
     padding: 2rem;
-    background: rgba(255, 59, 48, 0.1);
-    border: 1px solid #ff3b30;
-    border-radius: 8px;
-    z-index: 10;
+    text-align: center;
 }
 
-#error.hidden { display: none !important; }
+#error.hidden { display: none; }
+
+.error-icon {
+    font-size: 48px;
+    color: #e05050;
+}
+
+#error h2 { font-size: 1.2rem; color: #e05050; }
+#error p { color: var(--text-dim); max-width: 400px; font-size: 12px; }
+
+/* ── Model info (bottom-left) ── */
+#model-info {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 200;
+    color: rgba(255,255,255,0.55);
+    font-size: 11px;
+    pointer-events: none;
+    user-select: none;
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ── Credits (bottom-right) ── */
+#credits {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    z-index: 200;
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    text-align: right;
+    pointer-events: none;
+}
+
+#credits a {
+    color: var(--accent2);
+    text-decoration: none;
+    pointer-events: all;
+}
+
+/* ── Measurement line canvas overlay ── */
+#measure-canvas {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 150;
+}
+
+/* ── Misc animations ── */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

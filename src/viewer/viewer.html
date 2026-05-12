@@ -1,73 +1,121 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Visor 3D - Specify 7</title>
-    <!-- 3DHOP Styles -->
-    <link rel="stylesheet" href="../../lib/3dhop/stylesheet/3dhop.css">
-    <!-- Extension Styles -->
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <title>3D Viewer — Specify7+</title>
     <link rel="stylesheet" href="viewer.css">
-    
-    <!-- 3DHOP Dependencies (must be non-module for compatibility) -->
-    <script src="../../lib/3dhop/js/jquery.js"></script>
-    <script src="../../lib/3dhop/js/spidergl.js"></script>
-    <script src="../../lib/3dhop/js/nexus.js"></script>
-    <script src="../../lib/3dhop/js/presenter.js"></script>
-    <script src="../../lib/3dhop/js/init.js"></script>
-    <script src="../../lib/3dhop/js/trackball_sphere.js"></script>
-    <script src="../../lib/3dhop/js/helpers.js"></script>
-    <script src="../../lib/3dhop/js/corto.js"></script>
 </head>
 <body>
-    <div id="header">
-        <h1 id="model-title">Loading 3D model...</h1>
-        <div id="controls">
-            <button id="download-btn" title="Download model">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                    <polyline points="7 10 12 15 17 10"></polyline>
-                    <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                Download
-            </button>
-        </div>
+
+    <!-- Top-left: measure instructions -->
+    <div id="measure-hint">
+        <b><u>To Measure</u></b><br>
+        <span class="key-s"><b>S:</b></span> Start point<br>
+        <span class="key-e"><b>E:</b></span> End point<br>
+        <b>ESC:</b> Clear
     </div>
 
-    <!-- Híbrid Viewer Container -->
-    <div id="viewer-wrapper">
-        <!-- 3DHOP Container (Used for Nexus/PLY) -->
-        <div id="3dhop" class="tdhop" style="display:none;">
-            <div id="toolbar">
-                <img id="home"     title="Home"                  src="../../lib/3dhop/skins/dark/home.png" onclick="actionsToolbar('home')"/><br/>
-                <img id="zoomin"   title="Zoom In"               src="../../lib/3dhop/skins/dark/zoomin.png" onclick="actionsToolbar('zoomin')"/><br/>
-                <img id="zoomout"  title="Zoom Out"              src="../../lib/3dhop/skins/dark/zoomout.png" onclick="actionsToolbar('zoomout')"/><br/>
-                <img id="light"    title="Disable Light Control" src="../../lib/3dhop/skins/dark/light.png" onclick="actionsToolbar('light')"/><br/>
-                <img id="full"     title="Enter Fullscreen"      src="../../lib/3dhop/skins/dark/full.png" onclick="actionsToolbar('full')"/><br/>
+    <!-- Top-right: settings panel (dat.GUI style) -->
+    <div id="settings-panel">
+        <div class="settings-title">⚙ Settings</div>
+
+        <div class="setting-group">
+            <label>Background</label>
+            <div id="bg-swatches">
+                <div class="swatch active" data-color="#00274c" title="Michigan Blue" style="background:#00274c"></div>
+                <div class="swatch" data-color="#1a1a1a" title="Dark" style="background:#1a1a1a"></div>
+                <div class="swatch" data-color="#2d2d2d" title="Charcoal" style="background:#2d2d2d"></div>
+                <div class="swatch" data-color="#ffffff" title="White" style="background:#ffffff;border-color:#aaa"></div>
+                <div class="swatch" data-color="#f5f0e8" title="Ivory" style="background:#f5f0e8;border-color:#aaa"></div>
+                <div class="swatch" data-color="#1a3a1a" title="Forest" style="background:#1a3a1a"></div>
             </div>
-            <canvas id="draw-canvas"></canvas>
         </div>
 
-        <!-- Three.js Container (Used for STL/OBJ/GLTF) -->
-        <div id="threejs-container"></div>
+        <div class="setting-group">
+            <label>Opacity <span id="opacity-val">100%</span></label>
+            <input type="range" id="opacity-slider" min="0" max="100" value="100">
+        </div>
+
+        <div class="setting-group">
+            <label>Ambient Light <span id="ambient-val">60%</span></label>
+            <input type="range" id="ambient-slider" min="0" max="100" value="60">
+        </div>
+
+        <div class="setting-group">
+            <label>Directional Light <span id="dir-val">80%</span></label>
+            <input type="range" id="dir-slider" min="0" max="100" value="80">
+        </div>
+
+        <div class="setting-group">
+            <label>Wireframe</label>
+            <label class="toggle-switch">
+                <input type="checkbox" id="wireframe-toggle">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+
+        <div class="setting-group">
+            <label>Double-sided</label>
+            <label class="toggle-switch">
+                <input type="checkbox" id="doubleside-toggle" checked>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+
+        <div class="setting-group">
+            <label>Model Color</label>
+            <label class="toggle-switch">
+                <input type="checkbox" id="vertexcolor-toggle" checked>
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+
+        <hr class="settings-divider">
+
+        <button id="reset-camera-btn">↺ Reset Camera</button>
+        <button id="download-btn">⤓ Download Model</button>
     </div>
-    
+
+    <!-- Main 3D canvas -->
+    <div id="threejs-container"></div>
+
+    <!-- Measurement result badge -->
+    <div id="measure-result" class="hidden">
+        <span id="measure-distance"></span>
+        <button id="clear-measure-btn" title="Clear measurement">✕</button>
+    </div>
+
+    <!-- Measurement dot markers -->
+    <div id="dot-start" class="measure-dot dot-start hidden"></div>
+    <div id="dot-end" class="measure-dot dot-end hidden"></div>
+
+    <!-- Loading overlay -->
     <div id="loading">
-        <div class="spinner"></div>
-        <p>Loading 3D model...</p>
+        <div class="spinner-ring"></div>
+        <p id="loading-label">Loading 3D model…</p>
     </div>
-    
+
+    <!-- Error overlay -->
     <div id="error" class="hidden">
-        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-        </svg>
-        <h2>Error loading model</h2>
+        <div class="error-icon">⚠</div>
+        <h2>Could not load model</h2>
         <p id="error-message"></p>
     </div>
 
-    <!-- Load viewer engine logic as an ES module -->
+    <!-- Bottom-left: model info -->
+    <div id="model-info">
+        <span id="model-title-label">3D Model</span>
+    </div>
+
+    <!-- Bottom-right: credits -->
+    <div id="credits">
+        Viewer powered by <a href="https://threejs.org" target="_blank">three.js</a>
+    </div>
+
+    <!-- Measurement line overlay canvas -->
+    <canvas id="measure-canvas"></canvas>
+
     <script type="module" src="viewer.js"></script>
 </body>
 </html>
