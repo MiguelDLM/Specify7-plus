@@ -20,9 +20,10 @@ import { OBJLoader }     from '../../lib/three/jsm/OBJLoader.js';
 import { PLYLoader }     from '../../lib/three/jsm/PLYLoader.js';
 
 // ─── URL Parameters ───────────────────────────────────────────────────────────
-const urlParams    = new URLSearchParams(window.location.search);
-const modelUrl     = urlParams.get('url');
-const displayTitle = urlParams.get('title') || urlParams.get('filename') || urlParams.get('name') || '3D Model';
+const urlParams     = new URLSearchParams(window.location.search);
+const modelUrl      = urlParams.get('url');
+const displayTitle  = urlParams.get('title') || urlParams.get('filename') || urlParams.get('name') || '3D Model';
+const metadataParam = urlParams.get('metadata');
 
 // ─── Three.js globals ─────────────────────────────────────────────────────────
 let scene, camera, renderer, controls;
@@ -557,8 +558,45 @@ function main() {
     const dsToggle = document.getElementById('doubleside-toggle');
     if (dsToggle) dsToggle.checked = false;
 
-    // Set model title
+    // Set model title and document title
     document.getElementById('model-title-label').textContent = displayTitle;
+    document.title = displayTitle + ' — Specify7+';
+
+    // Parse and populate specimen details metadata panel
+    try {
+        if (metadataParam) {
+            const metadata = JSON.parse(decodeURIComponent(metadataParam));
+            if (Array.isArray(metadata) && metadata.length > 0) {
+                const metadataContent = document.getElementById('metadata-content');
+                const metadataPanel   = document.getElementById('specimen-metadata-panel');
+                
+                metadataContent.innerHTML = '';
+                metadata.forEach(item => {
+                    if (item.label && item.value) {
+                        const row = document.createElement('div');
+                        row.className = 'metadata-row';
+                        
+                        const labelSpan = document.createElement('span');
+                        labelSpan.className = 'metadata-label';
+                        labelSpan.textContent = item.label;
+                        labelSpan.title = item.label;
+                        
+                        const valueSpan = document.createElement('span');
+                        valueSpan.className = 'metadata-value';
+                        valueSpan.textContent = item.value;
+                        
+                        row.appendChild(labelSpan);
+                        row.appendChild(valueSpan);
+                        metadataContent.appendChild(row);
+                    }
+                });
+                
+                metadataPanel.classList.remove('hidden');
+            }
+        }
+    } catch (e) {
+        console.warn('Specify7+: Could not parse metadata parameter', e);
+    }
 
 
     if (!modelUrl) {

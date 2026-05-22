@@ -8,12 +8,21 @@
 </head>
 <body>
 
-    <!-- Top-left: measure instructions -->
-    <div id="measure-hint">
-        <b><u>To Measure</u></b><br>
-        <span class="key-s"><b>S:</b></span> Start point<br>
-        <span class="key-e"><b>E:</b></span> End point<br>
-        <b>ESC:</b> Clear
+    <!-- Top-left: container for instructions and specimen metadata -->
+    <div id="top-left-container">
+        <div id="measure-hint">
+            <b><u>To Measure</u></b><br>
+            <span class="key-s"><b>S:</b></span> Start point<br>
+            <span class="key-e"><b>E:</b></span> End point<br>
+            <b>ESC:</b> Clear
+        </div>
+
+        <div id="specimen-metadata-panel" class="hidden">
+            <details open>
+                <summary>📋 Specimen Details</summary>
+                <div id="metadata-content"></div>
+            </details>
+        </div>
     </div>
 
     <!-- Top-right: settings panel (dat.GUI style) -->
