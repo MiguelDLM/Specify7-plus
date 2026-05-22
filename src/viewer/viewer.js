@@ -286,7 +286,7 @@ function onModelLoaded(result, ext) {
                 const mat = new THREE.MeshStandardMaterial({
                     color: hasColors ? 0xffffff : 0xcccccc, 
                     roughness: 0.6, metalness: 0.1,
-                    side: THREE.DoubleSide, transparent: false, opacity: 1,
+                    side: THREE.FrontSide, transparent: false, opacity: 1,
                     vertexColors: hasColors
                 });
                 child.material = mat;
@@ -312,7 +312,7 @@ function onModelLoaded(result, ext) {
         material = new THREE.MeshStandardMaterial({
             color: hasColors ? 0xffffff : 0xcccccc, 
             roughness: 0.6, metalness: 0.1,
-            side: THREE.DoubleSide, transparent: false, opacity: 1,
+            side: THREE.FrontSide, transparent: false, opacity: 1,
             vertexColors: hasColors
         });
         const mesh = new THREE.Mesh(geometry, material);
@@ -498,6 +498,10 @@ function main() {
     dotEnd        = document.getElementById('dot-end');
     measureResult = document.getElementById('measure-result');
     measureDistEl = document.getElementById('measure-distance');
+
+    // Ensure double-sided toggle is off by default (user enables if needed)
+    const dsToggle = document.getElementById('doubleside-toggle');
+    if (dsToggle) dsToggle.checked = false;
 
     // Set model title
     document.getElementById('model-title-label').textContent = displayTitle;

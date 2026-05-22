@@ -21,7 +21,7 @@
         <div class="settings-title">⚙ Settings</div>
 
         <div class="setting-group">
-            <label>Background</label>
+            <label title="Change the scene background color">Background</label>
             <div id="bg-swatches">
                 <div class="swatch active" data-color="#00274c" title="Michigan Blue" style="background:#00274c"></div>
                 <div class="swatch" data-color="#1a1a1a" title="Dark" style="background:#1a1a1a"></div>
@@ -33,48 +33,48 @@
         </div>
 
         <div class="setting-group">
-            <label>Opacity <span id="opacity-val">100%</span></label>
-            <input type="range" id="opacity-slider" min="0" max="100" value="100">
+            <label title="Adjust model opacity (0% transparent, 100% opaque)">Opacity <span id="opacity-val">100%</span></label>
+            <input type="range" id="opacity-slider" min="0" max="100" value="100" title="Adjust model opacity (transparency)">
         </div>
 
         <div class="setting-group">
-            <label>Ambient Light <span id="ambient-val">60%</span></label>
-            <input type="range" id="ambient-slider" min="0" max="100" value="60">
+            <label title="Adjust ambient light intensity (overall scene brightness)">Ambient Light <span id="ambient-val">60%</span></label>
+            <input type="range" id="ambient-slider" min="0" max="100" value="60" title="Adjust ambient light intensity">
         </div>
 
         <div class="setting-group">
-            <label>Directional Light <span id="dir-val">80%</span></label>
-            <input type="range" id="dir-slider" min="0" max="100" value="80">
+            <label title="Adjust directional light intensity (shadows and highlights)">Directional Light <span id="dir-val">80%</span></label>
+            <input type="range" id="dir-slider" min="0" max="100" value="80" title="Adjust directional light intensity">
         </div>
 
         <div class="setting-group">
-            <label>Wireframe</label>
+            <label title="Toggle wireframe rendering to show mesh edges">Wireframe</label>
             <label class="toggle-switch">
-                <input type="checkbox" id="wireframe-toggle">
+                <input type="checkbox" id="wireframe-toggle" title="Toggle wireframe rendering to show mesh edges">
                 <span class="toggle-slider"></span>
             </label>
         </div>
 
         <div class="setting-group">
-            <label>Double-sided</label>
+            <label title="Render both sides of each triangle; enable only if faces are invisible from some angles">Double-sided</label>
             <label class="toggle-switch">
-                <input type="checkbox" id="doubleside-toggle" checked>
+                <input type="checkbox" id="doubleside-toggle" title="Render both sides of triangles; enable if parts disappear when viewed from the back">
                 <span class="toggle-slider"></span>
             </label>
         </div>
 
         <div class="setting-group">
-            <label>Model Color</label>
+            <label title="Use per-vertex colors embedded in the model file if available">Model Color</label>
             <label class="toggle-switch">
-                <input type="checkbox" id="vertexcolor-toggle" checked>
+                <input type="checkbox" id="vertexcolor-toggle" checked title="Use per-vertex colors if present in the file">
                 <span class="toggle-slider"></span>
             </label>
         </div>
 
         <hr class="settings-divider">
 
-        <button id="reset-camera-btn">↺ Reset Camera</button>
-        <button id="download-btn">⤓ Download Model</button>
+        <button id="reset-camera-btn" title="Reset camera to the initial fit position">↺ Reset Camera</button>
+        <button id="download-btn" title="Open the original model file in a new tab to download">⤓ Download Model</button>
     </div>
 
     <!-- Main 3D canvas -->
