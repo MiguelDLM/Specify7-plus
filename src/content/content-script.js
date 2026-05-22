@@ -752,53 +752,54 @@
   /**
    * Fills the form with the data
    */
-  function fillForm(data) {
-    // Reference type
+  async function fillForm(data) {
+    // Reference type — use native setter so React picks up the change
     const typeSelect = document.querySelector('select[name="ReferenceWorkType"]');
     if (typeSelect && data.type !== undefined) {
-      typeSelect.value = data.type;
+      try {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+        if (nativeSetter) nativeSetter.call(typeSelect, String(data.type));
+        else typeSelect.value = data.type;
+      } catch(e) { typeSelect.value = data.type; }
+      typeSelect.dispatchEvent(new Event('input', { bubbles: true }));
       typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
       typeSelect.classList.remove('not-touched');
+      await sleep(100);
     }
-    
-    // Text fields
+
+    // Text fields — use setSafeValue so React's controlled inputs register the change
     const fieldMapping = {
       'title': data.title,
       'publisher': data.publisher,
       'placeOfPublication': data.placeOfPublication,
-      'workDate': data.workDate,
-      'volume': data.volume,
+      'workDate': data.workDate ? String(data.workDate) : '',
+      'volume': data.volume ? String(data.volume) : '',
       'pages': data.pages,
       'libraryNumber': data.libraryNumber
     };
-    
+
     for (const [fieldName, value] of Object.entries(fieldMapping)) {
       if (value) {
         const input = document.querySelector(`input[name="${fieldName}"]`);
         if (input) {
-          input.value = value;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
-          input.dispatchEvent(new Event('change', { bubbles: true }));
-          input.classList.remove('not-touched');
+          await setSafeValue(input, value);
         }
       }
     }
-    
+
     // Journal (special field with autocomplete)
     if (data.journal) {
-      const journalInput = document.querySelector('input[role="combobox"][title*="Journal"]');
+      const journalInput = document.querySelector('input[role="combobox"][title*="Journal"]') ||
+                           document.querySelector('input[role="combobox"][title*="journal"]');
       if (journalInput) {
-        journalInput.value = data.journal;
-        journalInput.dispatchEvent(new Event('input', { bubbles: true }));
-        journalInput.dispatchEvent(new Event('change', { bubbles: true }));
-        journalInput.classList.remove('not-touched');
+        await setSafeValue(journalInput, data.journal);
       }
     }
-    
+
     // Handle authors - attempt auto-insertion
     if (data.authors && data.authors.length > 0) {
       console.log('Authors to import:', data.authors);
-      
+
       // Try to auto-insert authors into the Authors subform
       addAuthorsToForm(data.authors).then((added) => {
         const existing = countExistingAuthors();
@@ -915,23 +916,17 @@
 
     // Get all combobox inputs in the authors fieldset
     const comboboxes = Array.from(authorsFs.querySelectorAll('input[role="combobox"]'));
-    
-    // Fill each combobox with corresponding author data
+
     for (let i = 0; i < Math.min(comboboxes.length, authors.length); i++) {
       const input = comboboxes[i];
       const author = authors[i];
-      
+
       const last = author.lastName || '';
       const first = author.firstName || '';
       const display = last && first ? `${last}, ${first}` : (last || first);
 
       if (display && input) {
-        input.focus();
-        input.value = display;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-        input.classList.remove('not-touched');
-        await sleep(100);
+        await setSafeValue(input, display);
       }
     }
   }
@@ -1009,32 +1004,37 @@
   function addButtonsToForm() {
     const isRefForm = isSpecifyReferenceForm();
     const isColForm = isSpecifyCollectionObjectForm();
-    
+
     if (!isRefForm && !isColForm) return;
 
     // Try multiple possible toolbars
     const modalToolbar = document.querySelector('.flex.gap-2.justify-end');
     const roleToolbar = document.querySelector('[role="toolbar"]');
-    
+
     const buttonContainer = modalToolbar || roleToolbar;
 
-    if (isRefForm && buttonContainer) {
-      const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
-      if (!document.querySelector('.bibtex-import-button') && enabledFeatures.bibtex !== false) {
-        const bibtexButton = createBibtexButton();
-        buttonContainer.insertBefore(bibtexButton, firstButton || null);
-      }
-      
-      if (!document.querySelector('.doi-import-button') && enabledFeatures.doi !== false) {
-        const doiButton = createDoiButton();
-        buttonContainer.insertBefore(doiButton, firstButton || null);
+    if (isRefForm) {
+      const bibtexMissing = !document.querySelector('.bibtex-import-button') && enabledFeatures.bibtex !== false;
+      const doiMissing = !document.querySelector('.doi-import-button') && enabledFeatures.doi !== false;
+
+      if (buttonContainer) {
+        const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
+        if (bibtexMissing) {
+          buttonContainer.insertBefore(createBibtexButton(), firstButton || null);
+        }
+        if (doiMissing) {
+          buttonContainer.insertBefore(createDoiButton(), firstButton || null);
+        }
+      } else if (bibtexMissing || doiMissing) {
+        // Toolbar not yet rendered — inject near the top of the form
+        injectReferenceFormButtonsFallback();
       }
     }
-    
+
     if (isColForm) {
       if (!document.querySelector('.clipboard-import-button')) {
         const clipboardButton = createClipboardImportButton();
-        
+
         if (buttonContainer) {
           const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
           buttonContainer.insertBefore(clipboardButton, firstButton || null);
@@ -1042,6 +1042,40 @@
           injectButtonAtTop(clipboardButton);
         }
       }
+    }
+  }
+
+  /**
+   * Fallback injection for Reference Work forms when no toolbar is found yet.
+   * Inserts buttons at the top of the form container.
+   */
+  function injectReferenceFormButtonsFallback() {
+    if (document.querySelector('.bibtex-import-button') && document.querySelector('.doi-import-button')) return;
+
+    const anchor = document.querySelector('select[name="ReferenceWorkType"]') ||
+                   document.querySelector('input[name="title"]');
+    if (!anchor) return;
+
+    const formContainer = anchor.closest('[role="dialog"]') ||
+                          anchor.closest('form') ||
+                          anchor.closest('.grid') ||
+                          anchor.closest('section') ||
+                          anchor.parentElement?.parentElement;
+    if (!formContainer) return;
+
+    const btnWrapper = document.createElement('div');
+    btnWrapper.className = 'specify7plus-btn-fallback';
+    btnWrapper.style.cssText = 'display:flex;justify-content:flex-end;padding:6px 0 10px;gap:8px;flex-wrap:wrap;';
+
+    if (!document.querySelector('.bibtex-import-button') && enabledFeatures.bibtex !== false) {
+      btnWrapper.appendChild(createBibtexButton());
+    }
+    if (!document.querySelector('.doi-import-button') && enabledFeatures.doi !== false) {
+      btnWrapper.appendChild(createDoiButton());
+    }
+
+    if (btnWrapper.children.length > 0) {
+      formContainer.insertBefore(btnWrapper, formContainer.firstChild);
     }
   }
 
@@ -1063,14 +1097,20 @@
   }
   
   /**
-   * Observes DOM changes to detect when the form opens
+   * Observes DOM changes to detect when the form opens.
+   * Uses a debounce so the form has time to fully render before we try to inject buttons.
    */
   function observeFormChanges() {
-    const observer = new MutationObserver((mutations) => {
-      if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
-        addButtonsToForm();
-        addPasteButtonsToAllFields();
-      }
+    let debounceTimer = null;
+
+    const observer = new MutationObserver(() => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
+          addButtonsToForm();
+          addPasteButtonsToAllFields();
+        }
+      }, 200);
     });
 
     observer.observe(document.body, {
