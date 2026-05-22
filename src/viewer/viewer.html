@@ -71,6 +71,25 @@
             </label>
         </div>
 
+        <div class="setting-group">
+            <label title="Pick a base color to apply to the model">Base Color</label>
+            <input type="color" id="basecolor-picker" value="#cccccc" title="Pick a base color for the model">
+            <div id="color-presets" style="margin-top:6px">
+                <button class="color-preset" data-color="#e6dfc8" title="Bone">Bone</button>
+                <button class="color-preset" data-color="#ffffff" title="White">White</button>
+                <button class="color-preset" data-color="#cccccc" title="Grey">Grey</button>
+                <button class="color-preset" data-color="#d1c7b0" title="Natural">Natural</button>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <label title="Use any textures embedded in the model (OBJ/MTL). If disabled, the base color is used">Use model textures</label>
+            <label class="toggle-switch">
+                <input type="checkbox" id="use-texture-toggle" checked title="Enable to show model textures when available">
+                <span class="toggle-slider"></span>
+            </label>
+        </div>
+
         <hr class="settings-divider">
 
         <button id="reset-camera-btn" title="Reset camera to the initial fit position">↺ Reset Camera</button>

@@ -284,11 +284,20 @@ function onModelLoaded(result, ext) {
                     }
                     const hasColors = child.geometry.attributes.color !== undefined;
                 const mat = new THREE.MeshStandardMaterial({
-                    color: hasColors ? 0xffffff : 0xcccccc, 
+                    color: hasColors ? 0xffffff : 0xcccccc,
                     roughness: 0.6, metalness: 0.1,
                     side: THREE.FrontSide, transparent: false, opacity: 1,
                     vertexColors: hasColors
                 });
+                // Preserve any texture map provided by the loader (OBJ with MTL)
+                if (child.material && child.material.map) {
+                    mat.map = child.material.map;
+                    // keep a reference to the original map so toggling textures is possible
+                    mat.userData = mat.userData || {};
+                    mat.userData.origMap = child.material.map;
+                    // when a texture exists, ensure base color is white so texture isn't tinted
+                    mat.color.setHex(0xffffff);
+                }
                 child.material = mat;
                 if (!geometry) geometry = child.geometry;
             }
@@ -315,6 +324,9 @@ function onModelLoaded(result, ext) {
             side: THREE.FrontSide, transparent: false, opacity: 1,
             vertexColors: hasColors
         });
+        // store original map placeholder (none for geometries that don't carry textures)
+        material.userData = material.userData || {};
+        material.userData.origMap = material.map || null;
         const mesh = new THREE.Mesh(geometry, material);
         meshGroup.add(mesh);
 
@@ -473,6 +485,48 @@ function initSettingsPanel() {
             m.needsUpdate = true;
         });
     });
+
+    // Base color picker + presets
+    const baseColorPicker = document.getElementById('basecolor-picker');
+    const useTextureToggle = document.getElementById('use-texture-toggle');
+    function applyBaseColor(col) {
+        const useVertex = document.getElementById('vertexcolor-toggle').checked;
+        const useTexture = useTextureToggle && useTextureToggle.checked;
+        getAllMaterials().forEach(m => {
+            if (useVertex && m.vertexColors) return; // respect per-vertex colors
+            if (m.userData && m.userData.origMap && useTexture) {
+                // if texture available and enabled, show texture and keep color white
+                m.map = m.userData.origMap;
+                m.color.setHex(0xffffff);
+            } else {
+                // no texture or textures disabled — apply base color
+                m.map = null;
+                try { m.color.set(col); } catch (e) { /* ignore invalid colors */ }
+            }
+            m.needsUpdate = true;
+        });
+    }
+
+    if (baseColorPicker) {
+        baseColorPicker.addEventListener('input', () => applyBaseColor(baseColorPicker.value));
+    }
+
+    document.querySelectorAll('.color-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const c = btn.dataset.color;
+            if (!c) return;
+            if (baseColorPicker) baseColorPicker.value = c;
+            applyBaseColor(c);
+        });
+    });
+
+    if (useTextureToggle) {
+        useTextureToggle.addEventListener('change', () => {
+            // Toggle texture usage on/off
+            const c = baseColorPicker ? baseColorPicker.value : '#cccccc';
+            applyBaseColor(c);
+        });
+    }
 
     // Reset camera
     document.getElementById('reset-camera-btn').addEventListener('click', () => {
