@@ -13,7 +13,8 @@
     doi: true,
     viewer3d: true,
     selectAll: true,
-    morphosource: true
+    morphosource: true,
+    json: true
     };
 
     // Keep track of the last captured data to know which buttons to show
@@ -64,34 +65,51 @@
   loadFeatureStates();
   
   /**
-   * Detects if we are in a Specify 7 Reference Work form
+   * Treat `document` as the "main form" context and each `[role="dialog"]`
+   * as its own context. When walking from document, exclude elements that
+   * live inside a dialog — otherwise opening a Reference Work modal makes
+   * isSpecifyReferenceForm(document) true and our buttons bleed into the
+   * Collection Object toolbar underneath.
    */
-  function isSpecifyReferenceForm() {
-    // Look for the modal title indicating it's a Reference Work form
-    const modalHeader = document.querySelector('h2[id*="modal"][id*="header"]');
-    if (modalHeader && modalHeader.textContent.includes('Reference Work')) {
-      return true;
-    }
-    
-    // Check for the presence of specific fields
-    const titleField = document.querySelector('input[name="title"]');
-    const publisherField = document.querySelector('input[name="publisher"]');
-    const typeSelect = document.querySelector('select[name="ReferenceWorkType"]');
-    
-    return titleField && publisherField && typeSelect;
+  function inSameContext(el, root) {
+    if (!el) return false;
+    if (root === document) return !el.closest('[role="dialog"]');
+    return root.contains(el);
+  }
+  function scopedAll(root, selector) {
+    return Array.from(root.querySelectorAll(selector)).filter(el => inSameContext(el, root));
+  }
+  function scopedFirst(root, selector) {
+    return scopedAll(root, selector)[0] || null;
   }
 
   /**
-   * Detects if we are in a Specify 7 Collection Object form
+   * Detects if `root` contains a Specify 7 Reference Work form.
    */
-  function isSpecifyCollectionObjectForm() {
-    // Look for any h2 containing "Collection Object"
-    const headers = Array.from(document.querySelectorAll('h2'));
-    const isColForm = headers.some(h2 => h2.textContent.includes('Collection Object'));
-    if (isColForm) return true;
-    
-    // Fallback: check for catalogNumber field
-    const catNumField = document.querySelector('input[name="catalogNumber"]');
+  function isSpecifyReferenceForm(root = document) {
+    const modalHeader = scopedAll(root, 'h2[id*="modal"][id*="header"]')
+      .find(h => h.textContent.includes('Reference Work'));
+    if (modalHeader) return true;
+
+    const dialogHeader = scopedAll(root, 'h2')
+      .find(h => /Reference Work/i.test(h.textContent));
+    if (dialogHeader) return true;
+
+    const titleField = scopedFirst(root, 'input[name="title"]');
+    const publisherField = scopedFirst(root, 'input[name="publisher"]');
+    const typeSelect = scopedFirst(root, 'select[name="ReferenceWorkType"]');
+
+    return !!(titleField && publisherField && typeSelect);
+  }
+
+  /**
+   * Detects if `root` contains a Specify 7 Collection Object form.
+   */
+  function isSpecifyCollectionObjectForm(root = document) {
+    const headers = scopedAll(root, 'h2');
+    if (headers.some(h2 => h2.textContent.includes('Collection Object'))) return true;
+
+    const catNumField = scopedFirst(root, 'input[name="catalogNumber"]');
     return !!catNumField;
   }
   
@@ -167,31 +185,22 @@
   }
   
   /**
-   * Handles BibTeX import
+   * Handles BibTeX import — always opens the paste modal, prefilled with
+   * the clipboard contents if available. Previously this auto-imported
+   * whenever the clipboard contained "@", which was a hidden shortcut
+   * that surprised users (especially when the clipboard already had
+   * unrelated BibTeX from another tab). The modal now always gives the
+   * user a chance to review or replace the text before importing.
    */
   async function handleBibtexImport() {
+    let clipboardText = '';
     try {
-      // Try to read from clipboard
-      const text = await navigator.clipboard.readText();
-      
-      if (!text.trim()) {
-        showMessage('Clipboard is empty', 'warning');
-        return;
-      }
-      
-      // If it doesn't look like BibTeX, show modal
-      if (!text.includes('@')) {
-        showBibtexInputModal();
-        return;
-      }
-      
-      processBibtexInput(text);
-      
+      clipboardText = await navigator.clipboard.readText();
     } catch (error) {
-      // If clipboard access fails, show modal
-      console.log('Could not access clipboard, showing modal:', error);
-      showBibtexInputModal();
+      // Permission denied or no focus — fall through with empty prefill.
+      console.log('Specify7+: Could not read clipboard for BibTeX prefill:', error);
     }
+    showBibtexInputModal(clipboardText);
   }
   
   /**
@@ -263,6 +272,237 @@
    */
   async function handleMorphoImport() {
     return handleClipboardImport();
+  }
+
+  /**
+   * Helper to normalize a string: lowercase, remove non-alphanumeric characters,
+   * and strip accents/diacritics to make matching extremely robust.
+   */
+  function normalizeString(str) {
+    if (!str) return '';
+    let clean = str
+      .toString()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    const stopwords = new Set(['de', 'del', 'el', 'la', 'los', 'las', 'y', 'o', 'of', 'the', 'in', 'and', 'or', 'a', 'an', 'to', 'for', 'with', 'by', 'at', 'on', 'from']);
+    const words = clean.split(/[^a-z0-9]+/);
+    const filteredWords = words.filter(word => word && !stopwords.has(word));
+    
+    return filteredWords.join('');
+  }
+
+  /**
+   * Flattens a nested object into a flat object with snake_case keys.
+   */
+  function flattenObject(obj, prefix = '') {
+    let result = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const newKey = prefix ? `${prefix}_${key}` : key;
+        if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+          Object.assign(result, flattenObject(obj[key], newKey));
+        } else {
+          result[newKey] = obj[key];
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Tries to find the label text corresponding to an input element.
+   * Walks up parents, siblings, and grid blocks.
+   */
+  function getInputLabelText(input) {
+    // 1. Associated label by 'for' attribute
+    if (input.id) {
+      const label = document.querySelector(`label[for="${input.id}"]`);
+      if (label && label.textContent.trim()) return label.textContent.trim();
+    }
+
+    // 2. aria-label — Specify uses this on headlessui-rendered combobox
+    // pickers (Taxon, Locality, Paleo Context, etc.) where the visible
+    // label sits in a separate row that doesn't reach this input via
+    // `for=` or `<label>` ancestry.
+    const ariaLabel = input.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
+
+    // 3. Parent label element
+    const parentLabel = input.closest('label');
+    if (parentLabel && parentLabel.textContent.trim()) return parentLabel.textContent.trim();
+    
+    // 3. Search siblings for label tag or elements with label-like classes
+    const parent = input.parentElement;
+    if (parent) {
+      const labelsInParent = parent.querySelectorAll('label');
+      for (const lbl of labelsInParent) {
+        if (lbl.textContent.trim()) return lbl.textContent.trim();
+      }
+      
+      let prev = input.previousElementSibling;
+      while (prev) {
+        if (prev.tagName === 'LABEL' || prev.classList.contains('control-label') || prev.classList.contains('label')) {
+          if (prev.textContent.trim()) return prev.textContent.trim();
+        }
+        if (prev.textContent && prev.textContent.trim().length > 1 && prev.textContent.trim().length < 50) {
+          if (!prev.contains(input)) return prev.textContent.trim();
+        }
+        prev = prev.previousElementSibling;
+      }
+    }
+    
+    // 4. Try looking at the closest grid cell or row labels
+    const formRow = input.closest('.grid') || input.closest('tr') || input.closest('.flex');
+    if (formRow) {
+      const labels = formRow.querySelectorAll('label, .label, .control-label');
+      if (labels.length === 1 && labels[0].textContent.trim()) {
+        return labels[0].textContent.trim();
+      }
+      
+      const inputWrapper = input.closest('.col-span-1') || input.closest('td') || input.parentElement;
+      if (inputWrapper) {
+        let cellPrev = inputWrapper.previousElementSibling;
+        if (cellPrev) {
+          const lbl = cellPrev.querySelector('label, .label, .control-label') || cellPrev;
+          if (lbl && lbl.textContent.trim()) return lbl.textContent.trim();
+        }
+      }
+    }
+    
+    return '';
+  }
+
+  /**
+   * Semantic aliases: a JSON key on the left can also match any of the
+   * normalized aria-labels / titles on the right. Specify groups several
+   * concepts under one combobox (e.g. "Paleo Context" covers stratigraphy,
+   * formation, member, age, era) so we need to expand the search space for
+   * those keys explicitly.
+   */
+  const KEY_ALIASES = {
+    stratigraphy: ['paleocontext', 'lithostratigraphy', 'chronostratigraphy'],
+    lithostratigraphy: ['paleocontext', 'lithostratigraphy'],
+    biostratigraphy: ['paleocontext', 'biostratigraphy'],
+    chronostratigraphy: ['paleocontext', 'chronostratigraphy'],
+    formation: ['paleocontext', 'lithostratigraphy'],
+    member: ['paleocontext', 'lithostratigraphy'],
+    geologicalage: ['paleocontext', 'chronostratigraphy'],
+    age: ['paleocontext', 'chronostratigraphy'],
+    period: ['paleocontext', 'chronostratigraphy'],
+    epoch: ['paleocontext', 'chronostratigraphy'],
+    era: ['paleocontext', 'chronostratigraphy'],
+    collector: ['collectors', 'agent', 'lastname'],
+    collectors: ['collectors', 'agent', 'lastname'],
+    locality: ['locality', 'localityname'],
+    determiner: ['determiner', 'lastname'],
+  };
+
+  /**
+   * Calculates a match score between an input field and a JSON key.
+   * Returns a score, where exact matches are highest and partial matches are lower.
+   */
+  function getMatchScore(input, key, labelText) {
+    const normKey = normalizeString(key);
+    if (!normKey) return 0;
+
+    const normName = normalizeString(input.getAttribute('name'));
+    const normId = normalizeString(input.getAttribute('id'));
+    const normLabel = normalizeString(labelText);
+    const normAria = normalizeString(input.getAttribute('aria-label'));
+    const normTitle = normalizeString(input.getAttribute('title'));
+    const normPlaceholder = normalizeString(input.getAttribute('placeholder'));
+
+    // Build the search keys: the literal normalized key plus any aliases.
+    // We pick the highest score across all of them.
+    const candidateKeys = new Set([normKey]);
+    for (const alias of (KEY_ALIASES[normKey] || [])) {
+      candidateKeys.add(alias);
+    }
+
+    let bestScore = 0;
+
+    const checkMatch = (normVal, baseScore, targetKey) => {
+      if (!normVal) return 0;
+      if (normVal === targetKey) {
+        return baseScore + 2; // Exact match
+      }
+      if (normVal.includes(targetKey) || targetKey.includes(normVal)) {
+        const ratio = Math.min(normVal.length, targetKey.length) / Math.max(normVal.length, targetKey.length);
+        let score = baseScore * 0.6 * ratio;
+        if (normVal.startsWith(targetKey) || normVal.endsWith(targetKey) || targetKey.startsWith(normVal) || targetKey.endsWith(normVal)) {
+          score += 0.5;
+        }
+        return score;
+      }
+      return 0;
+    };
+
+    // aria-label is Specify's canonical label for combobox pickers — weight
+    // it just below `name` because Specify often leaves `name` empty on
+    // headlessui-rendered comboboxes (taxon, locality, paleo context, etc.).
+    for (const ck of candidateKeys) {
+      bestScore = Math.max(bestScore, checkMatch(normName, 10, ck));
+      bestScore = Math.max(bestScore, checkMatch(normAria, 9.5, ck));
+      bestScore = Math.max(bestScore, checkMatch(normId, 9, ck));
+      bestScore = Math.max(bestScore, checkMatch(normLabel, 8, ck));
+      bestScore = Math.max(bestScore, checkMatch(normTitle, 7, ck));
+      bestScore = Math.max(bestScore, checkMatch(normPlaceholder, 6, ck));
+    }
+
+    return bestScore;
+  }
+
+  /**
+   * Automatically expands collapsed fieldsets/sections in the form.
+   * Scans for headings/legends, checks if they are collapsed (e.g. no inputs visible inside their container),
+   * and clicks the header/legend to expand them.
+   */
+  async function expandCollapsibleSections() {
+    const sectionNames = [
+      'other identifiers', 'otros identificadores',
+      'geological context', 'contexto geologico',
+      'preparations', 'preparaciones',
+      'determinations', 'determinaciones',
+      'locality', 'localidad',
+      'taxon', 'taxon',
+      'collecting event', 'evento de colecta',
+      'attributes', 'atributos'
+    ];
+
+    const headers = Array.from(document.querySelectorAll('legend, h3, h4, .fieldset-title, [class*="header"], [class*="title"]'));
+    
+    for (const header of headers) {
+      const text = header.textContent.trim().toLowerCase();
+      if (!text) continue;
+
+      const normText = normalizeString(text);
+      const isTargetSection = sectionNames.some(name => normalizeString(name) === normText || normText.includes(normalizeString(name)));
+      
+      if (!isTargetSection) continue;
+
+      const sectionContainer = header.closest('fieldset') || header.closest('section') || header.closest('.fieldset-container') || header.parentElement;
+      if (!sectionContainer) continue;
+
+      const inputs = sectionContainer.querySelectorAll('input, textarea, select');
+      let isCollapsed = true;
+      
+      for (const input of inputs) {
+        const rect = input.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(input).display !== 'none') {
+          isCollapsed = false;
+          break;
+        }
+      }
+
+      if (isCollapsed || inputs.length === 0) {
+        const toggleBtn = header.querySelector('button, [role="button"], svg, [class*="chevron"], [class*="caret"]') || header;
+        console.log(`Specify7+: Found collapsed section "${text}", attempting to expand it.`);
+        toggleBtn.click();
+        await sleep(250);
+      }
+    }
   }
 
   /**
@@ -374,10 +614,144 @@
   }
 
   /**
-   * Helper to find which data key corresponds to an input
+   * Find a fieldset whose heading matches `sectionRegex` and ensure it has
+   * at least one editable row. If the section is empty (typical for new
+   * Collection Object forms where Determinations / Paleo Context / Collecting
+   * Event subforms render an "Add" button only), this clicks Add and waits
+   * for the row to render before returning. Returns the fieldset or null.
+   */
+  async function ensureSubformRowFor(sectionRegex) {
+    const fieldsets = Array.from(document.querySelectorAll('fieldset'));
+    const fs = fieldsets.find(f => {
+      const h = f.querySelector('h3, h4, legend');
+      return h && sectionRegex.test(h.textContent);
+    });
+    if (!fs) return null;
+
+    const existingEditable = fs.querySelector(
+      'input[type="text"]:not([readonly]):not([disabled]),' +
+      'input[role="combobox"]:not([readonly]):not([disabled]),' +
+      'input[type="date"]:not([readonly]):not([disabled]),' +
+      'select:not([disabled]),' +
+      'textarea:not([readonly]):not([disabled])'
+    );
+    if (existingEditable) return fs;
+
+    const addBtn = Array.from(fs.querySelectorAll('button')).find(b => {
+      if (b.disabled) return false;
+      const haystack = (
+        (b.getAttribute('title') || '') + ' ' +
+        (b.getAttribute('aria-label') || '') + ' ' +
+        (b.textContent || '')
+      ).toLowerCase();
+      return /\badd\b|\bañad/i.test(haystack);
+    });
+
+    if (addBtn) {
+      addBtn.click();
+      await sleep(400);
+    }
+    return fs;
+  }
+
+  /**
+   * Returns true if the input is an autocomplete combobox that Specify 7
+   * clears on blur when the typed value doesn't match an existing record.
+   * In Specify, every `input[role="combobox"]` is one of these pickers
+   * (tree-pickers, agent lookups, locality, journal, etc.) — fixed-list
+   * dropdowns use `<select>` instead. So watching all of them is safe.
+   */
+  function isTreePickInput(input) {
+    return !!(input && input.getAttribute('role') === 'combobox');
+  }
+
+  /**
+   * Watch a tree-picker combobox: if Specify clears its value (typed name not
+   * matched against the tree), surface a small "Crear «value»" badge below
+   * the input. Clicking the badge re-types the value and gives the user a
+   * chance to pick the autocomplete "Add" suggestion or create the node.
+   */
+  function watchTreeFieldClearing(input, value) {
+    if (!input || !value) return;
+    input.dataset.pendingTreeValue = value;
+
+    if (input._specify7plusTreeWatched) return;
+    input._specify7plusTreeWatched = true;
+
+    let badge = null;
+
+    const refill = async () => {
+      await setSafeValue(input, value);
+      await sleep(400);
+      const listbox = document.querySelector('[role="listbox"]');
+      if (listbox) {
+        const opts = Array.from(listbox.querySelectorAll('[role="option"], li, button'));
+        const addOpt = opts.find(o => /\badd\b|\bañad|\bcrear/i.test(o.textContent || ''));
+        if (addOpt) addOpt.click();
+      }
+    };
+
+    const showBadge = () => {
+      if (badge && document.body.contains(badge)) return;
+      badge = document.createElement('button');
+      badge.type = 'button';
+      badge.className = 'specify7plus-tree-pending';
+      badge.title = `Specify borró "${value}" porque no existe en el árbol. Click para reinsertarlo y crear la entrada nueva.`;
+      badge.textContent = `Crear «${value}»`;
+      badge.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await refill();
+      });
+
+      const wrapper = input.closest('.relative') || input.parentElement;
+      if (wrapper) {
+        wrapper.style.position = wrapper.style.position || 'relative';
+        wrapper.appendChild(badge);
+      } else {
+        input.after(badge);
+      }
+    };
+
+    const hideBadge = () => {
+      if (badge) { badge.remove(); badge = null; }
+    };
+
+    const check = () => {
+      if (!document.body.contains(input)) return false;
+      const expected = input.dataset.pendingTreeValue;
+      if (!expected) { hideBadge(); return false; }
+      const current = (input.value || '').trim();
+      if (!current) {
+        showBadge();
+      } else if (current === expected) {
+        hideBadge();
+      }
+      return true;
+    };
+
+    const intervalId = setInterval(() => {
+      if (!check()) clearInterval(intervalId);
+    }, 600);
+    setTimeout(() => clearInterval(intervalId), 30000);
+
+    input.addEventListener('input', check);
+    input.addEventListener('change', check);
+    input.addEventListener('blur', () => setTimeout(check, 250));
+  }
+
+  /**
+   * Helper to find which data key corresponds to an input. Used by the
+   * per-field paste button as a fallback when keyword scoring doesn't
+   * match anything. Order matters: name → label → aria-label → title,
+   * narrow to broad, exact to substring. The title-based heuristics in
+   * particular must be SCOPED to the input's fieldset — Paleo Context's
+   * title contains "Full Name" twice ("…Chronostratigraphy / Full Name
+   * …Lithostratigraphy / Full Name") which used to mis-classify it as
+   * a Taxon input and then paste the taxon value into it.
    */
   function findFieldKey(input) {
-    // 1. Check by name attribute
+    // 1. Check by name attribute (server-rendered fields)
     const name = input.getAttribute('name');
     if (name) {
       if (name === 'catalogNumber') return 'inventoryNumber';
@@ -388,12 +762,11 @@
       if (name === 'stationFieldNumber') return 'inventoryNumber';
       if (name === 'verbatimDate') return 'dateCreated';
     }
-    
-    // 2. Check by label
+
+    // 2. Check by <label for=...>
     const label = document.querySelector(`label[for="${input.id}"]`);
     if (label) {
       const text = label.textContent.trim().toLowerCase();
-      // Use more specific matching to avoid false positives on generic fields
       if (text === 'catalog number') return 'inventoryNumber';
       if (text === 'alt cat number') return 'inventoryNumber';
       if (text === 'identifier') return 'inventoryNumber';
@@ -412,12 +785,86 @@
       if (text === 'count') return 'count';
     }
 
-    // 3. Check by title (common in Specify comboboxes)
-    const title = input.getAttribute('title') || '';
-    if (title.toLowerCase().includes('locality name')) return 'origin';
-    if (title.toLowerCase().includes('full name')) return 'taxon';
-    if (title.toLowerCase().includes('prepared by')) return 'creator';
-    if (title.toLowerCase().includes('prep type')) return 'prepType';
+    // 3. Check by aria-label — Specify uses this on its combobox pickers
+    // and it's unambiguous (one canonical name per field).
+    const aria = (input.getAttribute('aria-label') || '').trim().toLowerCase();
+    if (aria) {
+      if (aria === 'taxon') return 'taxon';
+      if (aria === 'locality' || aria === 'locality name') return 'origin';
+      if (aria === 'paleo context') return 'paleoContext';
+      if (aria === 'preparer' || aria === 'prepared by') return 'creator';
+      if (aria === 'collector' || aria === 'cataloger' || aria === 'determiner') return 'creator';
+    }
+
+    // 4. Title-based heuristics — only safe when scoped to the right
+    // fieldset, otherwise the heading-less form rows leak between
+    // sections (Paleo Context's title includes "Full Name" twice).
+    const title = (input.getAttribute('title') || '').toLowerCase();
+    const fs = input.closest('fieldset');
+    const heading = fs ? (fs.querySelector('h3, h4, legend')?.textContent || '').toLowerCase() : '';
+
+    if (title.includes('locality name')) return 'origin';
+    if (title.includes('prep type')) return 'prepType';
+    if (title.includes('prepared by')) return 'creator';
+    if (title.includes('full name') && /determination/i.test(heading)) return 'taxon';
+
+    return null;
+  }
+
+  /**
+   * Tries to find a matching value for an input in the lastCapturedData.
+   */
+  function findValueInCapturedData(input) {
+    if (!lastCapturedData) return null;
+    
+    const fieldKey = findFieldKey(input);
+    const labelText = getInputLabelText(input);
+    const keys = Object.keys(lastCapturedData);
+
+    // 1. Try to find key match via greedy scoring
+    let bestKey = null;
+    let bestScore = 0;
+
+    for (const key of keys) {
+      const score = getMatchScore(input, key, labelText);
+      if (score > bestScore && score >= 1.5) {
+        bestScore = score;
+        bestKey = key;
+      }
+    }
+
+    if (bestKey) {
+      return lastCapturedData[bestKey];
+    }
+
+    // 2. Specific legacy fallbacks for MorphoSource captured data
+    if (fieldKey === 'taxon') {
+      return `${lastCapturedData.genus || ''} ${lastCapturedData.species || ''}`.trim() || lastCapturedData.taxon;
+    }
+    if (fieldKey === 'inventoryNumber') {
+      return lastCapturedData.inventoryNumber || lastCapturedData.catalogNumber || lastCapturedData.altCatalogNumber || lastCapturedData.identifier || lastCapturedData.stationFieldNumber;
+    }
+    if (fieldKey === 'collection') {
+      return lastCapturedData.collection || lastCapturedData.institution;
+    }
+    if (fieldKey === 'description') {
+      return lastCapturedData.description || lastCapturedData.remarks;
+    }
+    if (fieldKey === 'paleoContext') {
+      return lastCapturedData.stratigraphy || lastCapturedData.lithostratigraphy ||
+             lastCapturedData.formation || lastCapturedData.member ||
+             lastCapturedData.geologicalAge || lastCapturedData.age ||
+             lastCapturedData.chronostratigraphy;
+    }
+    if (fieldKey === 'origin') {
+      return lastCapturedData.locality || lastCapturedData.localityName ||
+             lastCapturedData.origin;
+    }
+    if (fieldKey === 'creator') {
+      return lastCapturedData.collector || lastCapturedData.collectors ||
+             lastCapturedData.cataloger || lastCapturedData.determiner ||
+             lastCapturedData.creator;
+    }
 
     return null;
   }
@@ -428,27 +875,13 @@
   function injectPasteButton(input) {
     if (input.dataset.hasPasteBtn || input.readOnly || input.disabled) return;
     
-    const fieldKey = findFieldKey(input);
-    if (!fieldKey) return;
-
-    // Only show button if we have data for this field in lastCapturedData
-    if (!lastCapturedData) return;
-    
-    let hasData = false;
-    if (fieldKey === 'taxon') {
-      hasData = !!(lastCapturedData.genus || lastCapturedData.species);
-    } else if (fieldKey === 'inventoryNumber') {
-      hasData = !!(lastCapturedData.inventoryNumber || lastCapturedData.catalogNumber);
-    } else {
-      hasData = !!lastCapturedData[fieldKey];
-    }
-
-    if (!hasData) return;
+    const valueToSet = findValueInCapturedData(input);
+    if (valueToSet === undefined || valueToSet === null || valueToSet === '') return;
 
     const btn = document.createElement('button');
     btn.className = 'field-paste-btn';
     btn.type = 'button';
-    btn.title = `Paste ${fieldKey} from captured data`;
+    btn.title = `Paste value from captured data`;
     btn.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path>
@@ -461,17 +894,9 @@
       e.stopPropagation();
       
       try {
-        let valueToSet = '';
-        if (fieldKey === 'taxon') {
-          valueToSet = `${lastCapturedData.genus || ''} ${lastCapturedData.species || ''}`.trim();
-        } else if (fieldKey === 'inventoryNumber' && !lastCapturedData.inventoryNumber) {
-           valueToSet = lastCapturedData.catalogNumber || '';
-        } else {
-          valueToSet = lastCapturedData[fieldKey];
-        }
-
-        if (valueToSet) {
-          await setSafeValue(input, valueToSet);
+        const freshValue = findValueInCapturedData(input);
+        if (freshValue) {
+          await setSafeValue(input, freshValue.toString());
           btn.classList.add('success');
           setTimeout(() => btn.classList.remove('success'), 1000);
         }
@@ -483,10 +908,8 @@
     // Insertion logic: Place inside the input wrapper whenever possible
     const wrapper = input.parentElement;
     if (wrapper && (wrapper.classList.contains('relative') || wrapper.classList.contains('flex'))) {
-      // If it's a combobox, we want it inside but before other buttons if possible
       wrapper.appendChild(btn);
     } else {
-      // Fallback for simple inputs
       input.after(btn);
     }
     
@@ -602,6 +1025,7 @@
       const locInput = document.querySelector('input[role="combobox"][title*="Locality Name"]');
       if (locInput) {
         await setSafeValue(locInput, data.origin);
+        watchTreeFieldClearing(locInput, data.origin);
       }
     }
 
@@ -616,6 +1040,7 @@
         const preparedByInput = prepFs.querySelector('input[name*="preparedBy"], input[role="combobox"]');
         if (preparedByInput) {
           await setSafeValue(preparedByInput, data.creator);
+          watchTreeFieldClearing(preparedByInput, data.creator);
         }
       }
     }
@@ -628,23 +1053,24 @@
         const h3 = fs.querySelector('h3');
         return h3 && /Determinations\b/i.test(h3.textContent);
       });
-      
+
       if (detFs) {
-        let taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
+        let taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') ||
                          detFs.querySelector('input[role="combobox"]');
-                         
+
         if (!taxonInput) {
           const addBtn = detFs.querySelector('button[title="Add"]');
           if (addBtn && !addBtn.disabled) {
             addBtn.click();
             await sleep(300);
-            taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') || 
+            taxonInput = detFs.querySelector('input[role="combobox"][title*="Full Name"]') ||
                          detFs.querySelector('input[role="combobox"]');
           }
         }
-        
+
         if (taxonInput) {
           await setSafeValue(taxonInput, taxonStr);
+          watchTreeFieldClearing(taxonInput, taxonStr);
         }
       }
     }
@@ -653,7 +1079,18 @@
   /**
    * Shows modal to paste DOI and fetch metadata
    */
-  function showDoiInputModal() {
+  async function showDoiInputModal() {
+    // Try to prefill from clipboard. Accept either a bare DOI ("10.x/...")
+    // or a DOI URL ("https://doi.org/10.x/...") — common copy formats.
+    let prefill = '';
+    try {
+      const clip = (await navigator.clipboard.readText()).trim();
+      const doiMatch = clip.match(/(?:https?:\/\/(?:dx\.)?doi\.org\/)?(10\.\d{4,9}\/\S+)/i);
+      if (doiMatch) prefill = doiMatch[1];
+    } catch (e) {
+      // No clipboard access — leave empty.
+    }
+
     const modal = document.createElement('div');
     modal.className = 'bibtex-modal';
     modal.innerHTML = `
@@ -675,10 +1112,13 @@
 
     document.body.appendChild(modal);
 
+    const input = modal.querySelector('#doi-input');
+    if (prefill) input.value = prefill;
+
     modal.querySelector('.bibtex-modal-close').addEventListener('click', () => modal.remove());
     modal.querySelector('#doi-cancel').addEventListener('click', () => modal.remove());
     modal.querySelector('#doi-import').addEventListener('click', async () => {
-      const doi = modal.querySelector('#doi-input').value.trim();
+      const doi = input.value.trim();
       modal.remove();
       if (!doi) {
         showMessage('Please enter a DOI', 'warning');
@@ -688,7 +1128,10 @@
     });
 
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-    setTimeout(() => { modal.querySelector('#doi-input').focus(); }, 100);
+    setTimeout(() => {
+      input.focus();
+      if (input.value) input.select();
+    }, 100);
   }
 
   /**
@@ -787,12 +1230,17 @@
       }
     }
 
-    // Journal (special field with autocomplete)
+    // Journal (special field with autocomplete). Specify wipes the typed
+    // value on any unrelated state change (e.g. opening the New Agent
+    // dialog from an author "+ Add"), so attach the same "pending tree
+    // value" badge as taxon / stratigraphy — the user can refill with one
+    // click without re-typing the whole journal name.
     if (data.journal) {
       const journalInput = document.querySelector('input[role="combobox"][title*="Journal"]') ||
                            document.querySelector('input[role="combobox"][title*="journal"]');
       if (journalInput) {
         await setSafeValue(journalInput, data.journal);
+        watchTreeFieldClearing(journalInput, data.journal);
       }
     }
 
@@ -903,10 +1351,142 @@
   }
 
   /**
+   * Queue of recently-typed author intents. When the user clicks "+ Add"
+   * in an author combobox's autocomplete, Specify opens a "New Agent" dialog
+   * and dumps the whole typed string into `lastName` (firstName stays empty).
+   * We keep the parsed firstName / lastName around so the dialog watcher
+   * below can re-fill the dialog correctly once it appears.
+   */
+  const pendingAuthorIntents = [];
+  const PENDING_AUTHOR_TTL_MS = 5 * 60 * 1000;
+
+  function rememberAuthorIntent(author, typedString) {
+    if (!author || (!author.firstName && !author.lastName)) return;
+    pendingAuthorIntents.push({
+      author,
+      typedString: (typedString || '').trim(),
+      timestamp: Date.now()
+    });
+    const cutoff = Date.now() - PENDING_AUTHOR_TTL_MS;
+    while (pendingAuthorIntents.length && pendingAuthorIntents[0].timestamp < cutoff) {
+      pendingAuthorIntents.shift();
+    }
+  }
+
+  function consumePendingAuthorMatch(dialogLastName) {
+    if (!pendingAuthorIntents.length) return null;
+    const target = (dialogLastName || '').trim();
+    if (!target) return null; // Don't guess if Specify hasn't prefilled yet.
+
+    // Strict match only. Previously we fell back to the newest pending
+    // author when nothing matched, but that caused the New Agent dialog
+    // to be populated with the LAST author's data even when the user
+    // clicked "+ Add" on the first author's combobox. Better to no-op
+    // than to silently fill the wrong record.
+    const idx = pendingAuthorIntents.findIndex(p => {
+      if (p.typedString && p.typedString === target) return true;
+      if (p.author.lastName && p.author.lastName === target) return true;
+      if (p.author.lastName && target.startsWith(p.author.lastName + ',')) return true;
+      return false;
+    });
+    if (idx === -1) return null;
+
+    const [match] = pendingAuthorIntents.splice(idx, 1);
+    return match.author;
+  }
+
+  let agentDialogObserver = null;
+  function initAgentDialogWatcher() {
+    if (agentDialogObserver) return;
+    agentDialogObserver = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (!(node instanceof HTMLElement)) continue;
+          const dialogs = node.matches && node.matches('[role="dialog"]')
+            ? [node]
+            : Array.from(node.querySelectorAll ? node.querySelectorAll('[role="dialog"]') : []);
+          for (const dialog of dialogs) {
+            maybeFillAgentDialog(dialog);
+          }
+        }
+      }
+    });
+    agentDialogObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  async function maybeFillAgentDialog(dialog) {
+    if (dialog._specify7plusAgentFilled) return;
+
+    // Wait for React to mount the lastName/firstName inputs.
+    let lastInput = null;
+    let firstInput = null;
+    for (let i = 0; i < 25; i++) {
+      lastInput = dialog.querySelector('input[name="lastName"]');
+      firstInput = dialog.querySelector('input[name="firstName"]');
+      if (lastInput && firstInput) break;
+      await sleep(80);
+    }
+    if (!lastInput || !firstInput) return;
+
+    // Then wait for Specify to prefill lastName from the source combobox.
+    // Specify pushes this value after the dialog mounts, so polling here is
+    // necessary — reading too early gives "" and our matcher would no-op.
+    let prefilled = '';
+    for (let i = 0; i < 25; i++) {
+      prefilled = (lastInput.value || '').trim();
+      if (prefilled) break;
+      await sleep(80);
+    }
+
+    const author = consumePendingAuthorMatch(prefilled);
+    if (!author) return;
+
+    dialog._specify7plusAgentFilled = true;
+
+    // Make sure Agent Type is "Person" before filling personal name fields.
+    const typeSelect = dialog.querySelector('select[name="_AgentTypeComboBox"]');
+    if (typeSelect) {
+      const personOpt = Array.from(typeSelect.options).find(o => /^person|persona/i.test(o.text.trim()));
+      if (personOpt && typeSelect.value !== personOpt.value) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+        nativeSetter.call(typeSelect, personOpt.value);
+        typeSelect.dispatchEvent(new Event('input', { bubbles: true }));
+        typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(150);
+      }
+    }
+
+    // Specify dumped the whole "LastName, FirstName" search string into
+    // lastName — overwrite it with the parsed components.
+    if (author.lastName) {
+      await setSafeValue(lastInput, author.lastName);
+    }
+    if (author.firstName) {
+      const firstParts = author.firstName.trim().split(/\s+/);
+      const firstName = firstParts[0];
+      const middle = firstParts.slice(1).join(' ');
+
+      await setSafeValue(firstInput, firstName);
+
+      const middleInput = dialog.querySelector('input[name="middleInitial"]');
+      if (middleInput && middle) {
+        const initials = middle
+          .split(/\s+/)
+          .map(p => p[0] ? p[0].toUpperCase() + '.' : '')
+          .filter(Boolean)
+          .join(' ');
+        if (initials) await setSafeValue(middleInput, initials);
+      }
+    }
+  }
+
+  /**
    * Fill existing author fields with author data
    * @param {Array<{firstName:string,lastName:string}>} authors
    */
   async function fillExistingAuthorFields(authors) {
+    initAgentDialogWatcher();
+
     const fieldsets = Array.from(document.querySelectorAll('fieldset'));
     const authorsFs = fieldsets.find(fs => {
       const h3 = fs.querySelector('h3');
@@ -927,32 +1507,191 @@
 
       if (display && input) {
         await setSafeValue(input, display);
+        rememberAuthorIntent(author, display);
+        // Opening the New Agent dialog from any one row causes Specify to
+        // wipe the typed (but unselected) value in the OTHER author rows
+        // when the dialog closes. The badge gives the user a one-click
+        // refill so they don't lose their place.
+        watchTreeFieldClearing(input, display);
       }
     }
   }
-  
+
   /**
-   * Shows modal to paste BibTeX
+   * Processes the pasted JSON text and maps it to Specify form fields
    */
-  function showBibtexInputModal() {
+  async function processJsonInput(jsonText) {
+    if (!jsonText || !jsonText.trim()) {
+      showMessage('JSON input is empty', 'warning');
+      return;
+    }
+
+    let rawData;
+    try {
+      rawData = JSON.parse(jsonText);
+    } catch (e) {
+      console.error('Specify7+: Failed to parse JSON:', e);
+      showMessage('Invalid JSON format: ' + e.message, 'error');
+      return;
+    }
+
+    if (typeof rawData !== 'object' || rawData === null) {
+      showMessage('JSON must be an object or array of objects', 'error');
+      return;
+    }
+
+    const data = Array.isArray(rawData) ? rawData[0] : rawData;
+    if (typeof data !== 'object' || data === null) {
+      showMessage('JSON data is empty or invalid', 'error');
+      return;
+    }
+
+    const flatData = flattenObject(data);
+    const keys = Object.keys(flatData);
+
+    if (keys.length === 0) {
+      showMessage('No keys found in JSON object', 'warning');
+      return;
+    }
+
+    // 1. Clear previous captured data to avoid mixing old data with the new JSON data
+    lastCapturedData = {};
+    if (chrome && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ lastCapturedSpecimen: {} });
+    }
+
+    showMessage('Mapping JSON data...', 'info');
+
+    // 2. Automatically expand collapsed fieldsets/sections
+    await expandCollapsibleSections();
+
+    // 3. Pre-create rows in subforms that need an "Add" click before any input
+    //    is available. Only trigger when the JSON actually has a non-empty
+    //    value for one of the relevant keys — otherwise we'd open empty rows
+    //    for keys present as null (e.g. {"collector": null}).
+    const norm = s => normalizeString(s);
+    const hasNonEmpty = (set) => keys.some(k => set.includes(norm(k)) && flatData[k] != null && flatData[k] !== '');
+    const hasOtherIdKeys = hasNonEmpty(['altcatalognumber', 'institution', 'collection', 'otherid', 'otheridentifier']);
+    const hasDeterminationKeys = hasNonEmpty(['taxon', 'genus', 'species', 'determination', 'determinations', 'preferredtaxon', 'scientificname']);
+    const hasGeoContextKeys = hasNonEmpty(['stratigraphy', 'formation', 'member', 'lithostratigraphy', 'biostratigraphy', 'chronostratigraphy', 'geologicalage', 'age', 'period', 'epoch', 'era']);
+    const hasCollectingEventKeys = hasNonEmpty(['collector', 'collectors', 'collectiondate', 'startdate', 'enddate', 'verbatimdate', 'date', 'locality', 'localityname']);
+
+    if (hasOtherIdKeys) await ensureSubformRowFor(/Other Identifiers|Otros identificadores/i);
+    if (hasDeterminationKeys) await ensureSubformRowFor(/Determinations?|Determinaciones?/i);
+    if (hasGeoContextKeys) await ensureSubformRowFor(/Paleo\s*Context|Geological\s*Context|Contexto\s*Geol[oó]gico|Stratigraph|Estratigraf/i);
+    if (hasCollectingEventKeys) await ensureSubformRowFor(/Collecting\s*Event|Evento\s*de\s*Colecta/i);
+
+    // Get all supported inputs in the form (now updated with newly expanded/added inputs)
+    const inputs = Array.from(document.querySelectorAll('input:not([type="submit"]):not([type="button"]), textarea, select'));
+    
+    const inputsWithLabels = inputs.map(input => {
+      return {
+        input,
+        labelText: getInputLabelText(input)
+      };
+    });
+
+    const candidates = [];
+    const threshold = 1.5;
+
+    for (const key of keys) {
+      const val = flatData[key];
+      if (val === undefined || val === null || val === '') continue;
+
+      for (const entry of inputsWithLabels) {
+        const score = getMatchScore(entry.input, key, entry.labelText);
+        if (score >= threshold) {
+          candidates.push({
+            key,
+            value: val,
+            input: entry.input,
+            score
+          });
+        }
+      }
+    }
+
+    // Phase 1: greedy assignment by score — best (key, input) pairs win first,
+    // then both sides drop out of the pool. This is the same matching logic
+    // we had before; only the *execution* order changes below.
+    candidates.sort((a, b) => b.score - a.score);
+
+    const assignments = [];
+    const claimedInputs = new Set();
+    const claimedKeys = new Set();
+    for (const cand of candidates) {
+      if (claimedInputs.has(cand.input) || claimedKeys.has(cand.key)) continue;
+      claimedInputs.add(cand.input);
+      claimedKeys.add(cand.key);
+      assignments.push(cand);
+    }
+
+    // Phase 2: fill non-combobox fields first, then tree-picker comboboxes.
+    // Specify clears comboboxes when another field steals focus, so filling
+    // them last keeps their values from being wiped by subsequent setters.
+    assignments.sort((a, b) => {
+      const aIsCombo = a.input.getAttribute('role') === 'combobox' ? 1 : 0;
+      const bIsCombo = b.input.getAttribute('role') === 'combobox' ? 1 : 0;
+      return aIsCombo - bIsCombo;
+    });
+
+    let fillCount = 0;
+    for (const cand of assignments) {
+      try {
+        const strValue = cand.value.toString();
+        await setSafeValue(cand.input, strValue);
+        fillCount++;
+
+        if (isTreePickInput(cand.input)) {
+          watchTreeFieldClearing(cand.input, strValue);
+        }
+      } catch (err) {
+        console.error('Specify7+: Error setting value for key', cand.key, err);
+      }
+    }
+
+    // 4. Save the new JSON data to lastCapturedData and local storage so individual paste buttons can use it
+    for (const key in flatData) {
+      lastCapturedData[key] = flatData[key];
+    }
+    if (chrome && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ lastCapturedSpecimen: lastCapturedData });
+    }
+
+    // Remove old paste buttons and re-evaluate so the new JSON values show up next to matched fields
+    document.querySelectorAll('.field-paste-btn').forEach(b => b.remove());
+    document.querySelectorAll('[data-has-paste-btn]').forEach(i => delete i.dataset.hasPasteBtn);
+
+    if (fillCount > 0) {
+      showMessage(`Successfully imported ${fillCount} fields!`, 'success');
+      addPasteButtonsToAllFields();
+    } else {
+      showMessage('No fields could be mapped from the JSON.', 'warning');
+    }
+  }
+
+  /**
+   * Shows modal to paste JSON
+   */
+  function showJsonInputModal() {
     const modal = document.createElement('div');
     modal.className = 'bibtex-modal';
     modal.innerHTML = `
       <div class="bibtex-modal-content">
         <div class="bibtex-modal-header">
-          <h3>Paste BibTeX entry</h3>
+          <h3>Paste JSON data</h3>
           <button class="bibtex-modal-close" title="Close">&times;</button>
         </div>
         <div class="bibtex-modal-body">
           <textarea 
-            id="bibtex-input" 
-            placeholder="Paste your BibTeX entry here..."
+            id="json-input" 
+            placeholder='Paste your JSON object here...\n\nExample:\n{\n  "catalogNumber": "12345",\n  "taxon": "Canis lupus",\n  "remarks": "Sample description"\n}'
             rows="15"
           ></textarea>
         </div>
         <div class="bibtex-modal-footer">
-          <button class="bibtex-btn bibtex-btn-secondary" id="bibtex-cancel">Cancel</button>
-          <button class="bibtex-btn bibtex-btn-primary" id="bibtex-import">Import</button>
+          <button class="bibtex-btn bibtex-btn-secondary" id="json-cancel">Cancel</button>
+          <button class="bibtex-btn bibtex-btn-primary" id="json-import">Import</button>
         </div>
       </div>
     `;
@@ -961,11 +1700,11 @@
     
     // Event listeners
     modal.querySelector('.bibtex-modal-close').addEventListener('click', () => modal.remove());
-    modal.querySelector('#bibtex-cancel').addEventListener('click', () => modal.remove());
-    modal.querySelector('#bibtex-import').addEventListener('click', () => {
-      const text = modal.querySelector('#bibtex-input').value;
+    modal.querySelector('#json-cancel').addEventListener('click', () => modal.remove());
+    modal.querySelector('#json-import').addEventListener('click', () => {
+      const text = modal.querySelector('#json-input').value;
       modal.remove();
-      processBibtexInput(text);
+      processJsonInput(text);
     });
     
     // Close when clicking outside the modal
@@ -977,7 +1716,83 @@
     
     // Focus on the textarea
     setTimeout(() => {
-      modal.querySelector('#bibtex-input').focus();
+      modal.querySelector('#json-input').focus();
+    }, 100);
+  }
+
+  /**
+   * Creates the JSON import button
+   */
+  function createJsonButton() {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'json-import-button';
+    button.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      <span>Import JSON</span>
+    `;
+    button.title = 'Import data from JSON format';
+    
+    button.addEventListener('click', showJsonInputModal);
+    
+    return button;
+  }
+
+  /**
+   * Shows modal to paste BibTeX
+   */
+  function showBibtexInputModal(prefill = '') {
+    const modal = document.createElement('div');
+    modal.className = 'bibtex-modal';
+    modal.innerHTML = `
+      <div class="bibtex-modal-content">
+        <div class="bibtex-modal-header">
+          <h3>Paste BibTeX entry</h3>
+          <button class="bibtex-modal-close" title="Close">&times;</button>
+        </div>
+        <div class="bibtex-modal-body">
+          <textarea
+            id="bibtex-input"
+            placeholder="Paste your BibTeX entry here..."
+            rows="15"
+          ></textarea>
+        </div>
+        <div class="bibtex-modal-footer">
+          <button class="bibtex-btn bibtex-btn-secondary" id="bibtex-cancel">Cancel</button>
+          <button class="bibtex-btn bibtex-btn-primary" id="bibtex-import">Import</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const textarea = modal.querySelector('#bibtex-input');
+    if (prefill && /@\w+\s*\{/.test(prefill)) {
+      // Only prefill when the clipboard looks like BibTeX — avoids dumping
+      // unrelated clipboard contents into the textarea.
+      textarea.value = prefill;
+    }
+
+    modal.querySelector('.bibtex-modal-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('#bibtex-cancel').addEventListener('click', () => modal.remove());
+    modal.querySelector('#bibtex-import').addEventListener('click', () => {
+      const text = textarea.value;
+      modal.remove();
+      processBibtexInput(text);
+    });
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+
+    setTimeout(() => {
+      textarea.focus();
+      // If we prefilled, select all so the user can immediately replace it
+      // with Ctrl+V if it's the wrong entry.
+      if (textarea.value) textarea.select();
     }, 100);
   }
   
@@ -999,61 +1814,100 @@
   }
   
   /**
-   * Adds buttons to the form depending on type
+   * Find the toolbar (button row at the bottom of a form) inside `root`.
+   * Specify uses either `[role="toolbar"]` (standalone forms) or a flex
+   * container ending in `justify-end` (modal dialogs). When root is the
+   * document, the toolbar must NOT live inside a dialog — that would be
+   * the modal's toolbar, not the main form's.
    */
-  function addButtonsToForm() {
-    const isRefForm = isSpecifyReferenceForm();
-    const isColForm = isSpecifyCollectionObjectForm();
+  function findToolbar(root) {
+    return scopedFirst(root, '[role="toolbar"]') ||
+           scopedFirst(root, '.flex.gap-2.justify-end');
+  }
 
-    if (!isRefForm && !isColForm) return;
+  /**
+   * Inject import buttons into a single context (either the main document or
+   * a dialog modal). All existence checks and toolbar lookups are scoped to
+   * `root` so opening a Reference Work modal on top of a Collection Object
+   * page doesn't get confused by the buttons that already exist on the COD.
+   */
+  function addButtonsToContext(root) {
+    if (!root) return;
 
-    // Try multiple possible toolbars
-    const modalToolbar = document.querySelector('.flex.gap-2.justify-end');
-    const roleToolbar = document.querySelector('[role="toolbar"]');
+    const isRefForm = isSpecifyReferenceForm(root);
+    const isColForm = isSpecifyCollectionObjectForm(root);
 
-    const buttonContainer = modalToolbar || roleToolbar;
+    const buttonContainer = findToolbar(root);
+    const hasInputs = scopedAll(root, 'input:not([type="submit"]):not([type="button"]), textarea, select').length > 0;
+    const isAnyForm = buttonContainer && hasInputs;
+
+    if (!isRefForm && !isColForm && !isAnyForm) return;
+
+    // Remove any stale buttons that don't belong in this context. Earlier
+    // versions of addButtonsToForm could mis-inject when a Reference Work
+    // modal was open on top of a Collection Object form, leaving BibTeX
+    // and DOI buttons behind in the COD toolbar after the modal closed.
+    if (isColForm && !isRefForm) {
+      scopedAll(root, '.bibtex-import-button:not(.clipboard-import-button)').forEach(b => b.remove());
+      scopedAll(root, '.doi-import-button').forEach(b => b.remove());
+    } else if (isRefForm && !isColForm) {
+      scopedAll(root, '.clipboard-import-button').forEach(b => b.remove());
+      scopedAll(root, '.json-import-button').forEach(b => b.remove());
+    }
+
+    // Existence checks must be scoped — otherwise an "already present" button
+    // in a dialog blocks injection into the main form (or vice versa).
+    const hasBtn = (sel) => !!scopedFirst(root, sel);
 
     if (isRefForm) {
-      const bibtexMissing = !document.querySelector('.bibtex-import-button') && enabledFeatures.bibtex !== false;
-      const doiMissing = !document.querySelector('.doi-import-button') && enabledFeatures.doi !== false;
+      // Reference Work only gets BibTeX + DOI — JSON import is for the
+      // generic Collection Object workflow.
+      const bibtexMissing = !hasBtn('.bibtex-import-button:not(.clipboard-import-button)') && enabledFeatures.bibtex !== false;
+      const doiMissing = !hasBtn('.doi-import-button') && enabledFeatures.doi !== false;
 
       if (buttonContainer) {
         const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
-        if (bibtexMissing) {
-          buttonContainer.insertBefore(createBibtexButton(), firstButton || null);
-        }
-        if (doiMissing) {
-          buttonContainer.insertBefore(createDoiButton(), firstButton || null);
-        }
+        if (bibtexMissing) buttonContainer.insertBefore(createBibtexButton(), firstButton || null);
+        if (doiMissing) buttonContainer.insertBefore(createDoiButton(), firstButton || null);
       } else if (bibtexMissing || doiMissing) {
-        // Toolbar not yet rendered — inject near the top of the form
-        injectReferenceFormButtonsFallback();
+        injectReferenceFormButtonsFallback(root);
+      }
+    } else if (isColForm) {
+      const clipboardMissing = !hasBtn('.clipboard-import-button');
+      const jsonMissing = !hasBtn('.json-import-button') && enabledFeatures.json !== false;
+
+      if (buttonContainer) {
+        const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
+        if (clipboardMissing) buttonContainer.insertBefore(createClipboardImportButton(), firstButton || null);
+        if (jsonMissing) buttonContainer.insertBefore(createJsonButton(), firstButton || null);
+      } else {
+        if (clipboardMissing) injectButtonAtTop(createClipboardImportButton());
+        if (jsonMissing) injectButtonAtTop(createJsonButton());
       }
     }
+    // Note: we used to inject the JSON button into any unrecognized form, but
+    // that bled JSON imports into Locality / Author / Reference Work dialogs.
+    // JSON + Clipboard are scoped to the Collection Object workflow only.
+  }
 
-    if (isColForm) {
-      if (!document.querySelector('.clipboard-import-button')) {
-        const clipboardButton = createClipboardImportButton();
-
-        if (buttonContainer) {
-          const firstButton = buttonContainer.querySelector('button, input[type="submit"]');
-          buttonContainer.insertBefore(clipboardButton, firstButton || null);
-        } else {
-          injectButtonAtTop(clipboardButton);
-        }
-      }
-    }
+  /**
+   * Adds buttons to every form context on the page — the main document and
+   * each `[role="dialog"]` separately. Each context is treated independently
+   * so a Reference Work modal opened on top of a Collection Object form gets
+   * its own set of import buttons even though the COD form already has some.
+   */
+  function addButtonsToForm() {
+    addButtonsToContext(document);
+    document.querySelectorAll('[role="dialog"]').forEach(addButtonsToContext);
   }
 
   /**
    * Fallback injection for Reference Work forms when no toolbar is found yet.
-   * Inserts buttons at the top of the form container.
+   * Inserts buttons at the top of the form container scoped to `root`.
    */
-  function injectReferenceFormButtonsFallback() {
-    if (document.querySelector('.bibtex-import-button') && document.querySelector('.doi-import-button')) return;
-
-    const anchor = document.querySelector('select[name="ReferenceWorkType"]') ||
-                   document.querySelector('input[name="title"]');
+  function injectReferenceFormButtonsFallback(root = document) {
+    const anchor = root.querySelector('select[name="ReferenceWorkType"]') ||
+                   root.querySelector('input[name="title"]');
     if (!anchor) return;
 
     const formContainer = anchor.closest('[role="dialog"]') ||
@@ -1063,14 +1917,16 @@
                           anchor.parentElement?.parentElement;
     if (!formContainer) return;
 
+    if (formContainer.querySelector('.specify7plus-btn-fallback')) return;
+
     const btnWrapper = document.createElement('div');
     btnWrapper.className = 'specify7plus-btn-fallback';
     btnWrapper.style.cssText = 'display:flex;justify-content:flex-end;padding:6px 0 10px;gap:8px;flex-wrap:wrap;';
 
-    if (!document.querySelector('.bibtex-import-button') && enabledFeatures.bibtex !== false) {
+    if (!formContainer.querySelector('.bibtex-import-button:not(.clipboard-import-button)') && enabledFeatures.bibtex !== false) {
       btnWrapper.appendChild(createBibtexButton());
     }
-    if (!document.querySelector('.doi-import-button') && enabledFeatures.doi !== false) {
+    if (!formContainer.querySelector('.doi-import-button') && enabledFeatures.doi !== false) {
       btnWrapper.appendChild(createDoiButton());
     }
 
@@ -1106,7 +1962,12 @@
     const observer = new MutationObserver(() => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
+        const isRef = isSpecifyReferenceForm();
+        const isCol = isSpecifyCollectionObjectForm();
+        const buttonContainer = document.querySelector('.flex.gap-2.justify-end') || document.querySelector('[role="toolbar"]');
+        const hasInputs = document.querySelectorAll('input:not([type="submit"]):not([type="button"]), textarea, select').length > 0;
+        
+        if (isRef || isCol || (buttonContainer && hasInputs)) {
           addButtonsToForm();
           addPasteButtonsToAllFields();
         }
@@ -1482,8 +2343,13 @@
   
   // Initialize
   function init() {
+    const isRef = isSpecifyReferenceForm();
+    const isCol = isSpecifyCollectionObjectForm();
+    const buttonContainer = document.querySelector('.flex.gap-2.justify-end') || document.querySelector('[role="toolbar"]');
+    const hasInputs = document.querySelectorAll('input:not([type="submit"]):not([type="button"]), textarea, select').length > 0;
+
     // Check if the form is already there
-    if (isSpecifyReferenceForm() || isSpecifyCollectionObjectForm()) {
+    if (isRef || isCol || (buttonContainer && hasInputs)) {
       addButtonsToForm();
       addPasteButtonsToAllFields();
     }
