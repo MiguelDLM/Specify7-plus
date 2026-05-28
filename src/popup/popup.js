@@ -6,7 +6,8 @@ const DEFAULT_FEATURES = {
   doi: true,
   viewer3d: true,
   selectAll: true,
-  dataCapture: true
+  dataCapture: true,
+  json: true
 };
 
 // Load saved feature states
@@ -22,6 +23,7 @@ function loadFeatureStates() {
       document.getElementById('feature-3dviewer').checked = features.viewer3d !== false;
       document.getElementById('feature-selectall').checked = features.selectAll !== false;
       document.getElementById('feature-capture').checked = features.dataCapture !== false;
+      document.getElementById('feature-json').checked = features.json !== false;
     });
   }
 }
@@ -33,7 +35,8 @@ function saveFeatureStates() {
     doi: document.getElementById('feature-doi').checked,
     viewer3d: document.getElementById('feature-3dviewer').checked,
     selectAll: document.getElementById('feature-selectall').checked,
-    dataCapture: document.getElementById('feature-capture').checked
+    dataCapture: document.getElementById('feature-capture').checked,
+    json: document.getElementById('feature-json').checked
   };
   
   console.log('popup.js: saving feature states', features);
@@ -68,4 +71,5 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('feature-3dviewer').addEventListener('change', saveFeatureStates);
   document.getElementById('feature-selectall').addEventListener('change', saveFeatureStates);
   document.getElementById('feature-capture').addEventListener('change', saveFeatureStates);
+  document.getElementById('feature-json').addEventListener('change', saveFeatureStates);
 });
