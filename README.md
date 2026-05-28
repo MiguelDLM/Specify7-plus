@@ -12,11 +12,34 @@ Specify7+ is a browser extension for Chromium-based browsers that enhances Speci
 
 ## 🚀 Features
 
-### 📚 Bibliography Import
-- ✅ Import BibTeX entries from clipboard or manual entry
-- ✅ Import metadata by DOI (CrossRef API)
+### 📚 Bibliography Import (Reference Work form)
+- ✅ Import BibTeX entries (modal opens with clipboard pre-filled for review)
+- ✅ Import metadata by DOI from CrossRef (accepts bare DOI or `https://doi.org/...` URL)
 - ✅ Automatic mapping from BibTeX/CrossRef to Specify 7 fields
-- ✅ Smart author parsing and field population
+- ✅ Auto-creates new author rows; when Specify opens the **New Agent** dialog
+  for an unknown author, the extension correctly splits `lastName` /
+  `firstName` / `middleInitial` (instead of dumping the whole "Last, First"
+  search string into one field)
+- ✅ Yellow **Crear «valor»** badge under any combobox (Journal, Author,
+  Taxon, Locality, Paleo Context, Stratigraphy, etc.) whose typed value got
+  wiped by Specify because the record doesn't yet exist in the database —
+  one click refills the value so you don't lose your place
+
+### 📦 JSON Specimen Import (Collection Object form)
+- ✅ **Import JSON** + **Import from Clipboard** buttons on Collection
+  Object forms
+- ✅ Smart field matching that reads `aria-label`, `title`, `name`, `id`,
+  `label` and `placeholder` — so the same JSON works whether Specify
+  rendered the form via headless-ui (combobox pickers) or as a regular
+  HTML form
+- ✅ Semantic aliases for ambiguous keys: `stratigraphy`, `formation`,
+  `member`, `geologicalAge`, `age` all match the **Paleo Context** picker;
+  `collector` matches the Collectors / Cataloger row; etc.
+- ✅ Automatically clicks the **+ Add** button on subforms (Determinations,
+  Paleo Context, Collecting Event, Other Identifiers) when your JSON has
+  values for them and no editable row exists yet
+- ✅ Per-field paste buttons (small clipboard icons) appear next to each
+  field, scoped to the data you actually imported
 
 ### 🔬 3D Model Viewer
 - ✅ Classic Three.js 3D viewer with lighting and material controls
@@ -74,15 +97,108 @@ The extension will add a popup and content-script hooks into Specify 7 pages.
 
 ### Bibliography Import
 
-1. **Navigate to a Reference Work form** in Specify 7
+1. **Navigate to a Reference Work form** in Specify 7 — either standalone
+   (`/specify/view/referencework/new/`) or as a modal opened from a
+   Collection Object's **Citations** row. Only **Import BibTeX** and
+   **Import DOI** appear in this context; **Import JSON** and **Import from
+   Clipboard** stay scoped to the Collection Object form underneath, so the
+   two contexts never bleed into each other.
 2. **Import by DOI:**
-   - Click the **Import DOI** button
-   - Paste a DOI (e.g., `10.1038/s41586-020-2649-2`)
-   - Metadata is fetched from CrossRef and fills the form
+   - Click the **Import DOI** button. The modal opens with the clipboard
+     pre-filled if it contains something that looks like a DOI (bare
+     `10.x/...` or a `https://doi.org/10.x/...` URL).
+   - Press **Fetch** — metadata is pulled from CrossRef and the form fills.
 3. **Or import BibTeX:**
-   - Copy a BibTeX entry and click **Import BibTeX**
-   - Or paste it manually in the modal
-4. **Review and Save**
+   - Click **Import BibTeX**. The modal opens with the clipboard text
+     pre-filled if it looks like BibTeX (`@type{...}`), pre-selected so
+     `Ctrl+V` replaces it if you want a different entry.
+   - Press **Import** when you're ready.
+4. **Authors not yet in the database:** Specify pops up a **New Agent**
+   dialog when you click **+ Add** in an author combobox. The extension
+   correctly fills `lastName`, `firstName`, and `middleInitial` from the
+   BibTeX author. While that dialog is open, the other author rows are
+   protected by the **Crear «Last, First»** badge — one click refills any
+   row that Specify wiped during the focus shift.
+5. **Review and Save.**
+
+### JSON Import (Collection Object form)
+
+The JSON importer maps keys in your JSON to Specify form fields by scoring
+candidates across `aria-label`, `title`, `name`, `id`, `<label for=…>`,
+and `placeholder`. Accents, case, and stopwords are normalized; Spanish
+and English labels both work.
+
+1. Click the **Import JSON** button on a Collection Object form.
+2. Paste your JSON entry and press **Import**.
+3. The extension expands collapsed sections and, for each subform that
+   needs an empty row (Determinations, Paleo Context, Collecting Event,
+   Other Identifiers), clicks **+ Add** automatically before mapping.
+4. Review the populated fields and save.
+
+#### Smart matching: aria-label first, then semantic aliases
+
+Specify renders most pickers (Taxon, Locality, Paleo Context, Determiner,
+Collector) as `input[role="combobox"]` with `aria-label` as the canonical
+label — `name`/`<label for=…>` are usually empty there. The importer
+reads `aria-label` directly. For ambiguous keys it also tries semantic
+aliases:
+
+| Your JSON key                                      | Also matches (via alias)                        |
+|----------------------------------------------------|-------------------------------------------------|
+| `stratigraphy`, `formation`, `member`              | Paleo Context, Lithostratigraphy                |
+| `geologicalAge`, `age`, `period`, `epoch`, `era`   | Paleo Context, Chronostratigraphy               |
+| `lithostratigraphy`, `biostratigraphy`, `chronostratigraphy` | Paleo Context + the same-named tree    |
+| `locality`                                         | Locality Name                                   |
+| `collector`, `collectors`                          | Collectors row, Last Name, Agent                |
+| `determiner`                                       | Determiner / Last Name                          |
+
+#### "Crear «valor»" badge for unsaved tree entries
+
+When the typed value of a tree-picked field (Taxon, Locality, Paleo
+Context, Stratigraphy units, Journal, Author) doesn't match an existing
+record, Specify wipes the value on the next focus change. The extension
+catches that, leaves a yellow **+ Crear «valor»** badge below the field,
+and a single click refills the typed value plus auto-clicks Specify's
+autocomplete **+ Add** when present — so you can create the new tree node
+without having to retype anything.
+
+#### 🤖 LLM Prompt for Paleontology Data Extraction (Copilot / ChatGPT / Gemini)
+You can use the following prompt to ask an AI assistant (like Microsoft Copilot) to extract paleontological specimen data from a scientific paper or text in the correct JSON format:
+
+```text
+Extract the paleontological specimen information from the text below. Format the output as a clean, flat JSON object. Use the following keys:
+- "catalogNumber" (for the catalog or specimen number, e.g. "MCNAM-PV 450")
+- "altCatalogNumber" (for the original or alternative catalog number from another collection, e.g. "MACN-A 10234")
+- "institution" (for the institution or collection of origin, e.g. "Museo Argentino de Ciencias Naturales")
+- "taxon" (for the scientific name of the fossil, e.g. "Carnotaurus sastrei")
+- "locality" (for the geographic site or fossil locality)
+- "stratigraphy" (for the geological formation, member, or bed, e.g. "La Colonia Formation")
+- "geologicalAge" (for the epoch, age, or era, e.g. "Late Cretaceous")
+- "collector" (for the person or expedition who collected the fossil)
+- "date" (for the date of collection/discovery in YYYY-MM-DD format)
+- "remarks" (for anatomical description, skeletal elements preserved, or general remarks, e.g. "Left femur and partial pelvis")
+
+Provide ONLY the raw JSON object, without markdown formatting.
+
+Text:
+[PASTE TEXT OR PAPER HERE]
+```
+
+#### Sample JSON Structure
+```json
+{
+  "catalogNumber": "MCNAM-PV 450",
+  "altCatalogNumber": "MACN-A 10234",
+  "institution": "Museo Argentino de Ciencias Naturales",
+  "taxon": "Carnotaurus sastrei",
+  "locality": "Estancia Ochoa, Chubut Province",
+  "stratigraphy": "La Colonia Formation",
+  "geologicalAge": "Late Cretaceous",
+  "collector": "José Bonaparte",
+  "date": "1984-11-23",
+  "remarks": "Partially complete skeleton including skull, lower jaws, and postcranial elements."
+}
+```
 
 ### 3D Viewer
 
@@ -108,6 +224,16 @@ The extension will add a popup and content-script hooks into Specify 7 pages.
 
 - Uses CrossRef REST API (`https://api.crossref.org/works/:doi`)
 - Authors may need manual verification in the subform
+
+### Notes on theming
+
+- Modals and buttons mirror Specify's own dialog chrome: `border-radius: 6px`,
+  `bg-gradient-to-bl from-gray-200/neutral-800` panels, the 2 px
+  `border-brand-300` underline under the title, `text-transform: capitalize`
+  on action buttons.
+- Dark mode follows Specify's `body.dark` class (Tailwind class-based dark
+  mode) and also `prefers-color-scheme: dark` so the modals look right
+  outside the app.
 
 ## 🔧 Development
 
@@ -154,5 +280,5 @@ Features are toggled via the popup. To add a new feature:
 
 
 
-**Version:**1.0.0  
-**Last update:** October 2025
+**Version:** 2.0.0
+**Last update:** May 2026
