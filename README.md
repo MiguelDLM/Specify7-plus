@@ -143,14 +143,34 @@ label — `name`/`<label for=…>` are usually empty there. The importer
 reads `aria-label` directly. For ambiguous keys it also tries semantic
 aliases:
 
-| Your JSON key                                      | Also matches (via alias)                        |
-|----------------------------------------------------|-------------------------------------------------|
-| `stratigraphy`, `formation`, `member`              | Paleo Context, Lithostratigraphy                |
-| `geologicalAge`, `age`, `period`, `epoch`, `era`   | Paleo Context, Chronostratigraphy               |
-| `lithostratigraphy`, `biostratigraphy`, `chronostratigraphy` | Paleo Context + the same-named tree    |
-| `locality`                                         | Locality Name                                   |
-| `collector`, `collectors`                          | Collectors row, Last Name, Agent                |
-| `determiner`                                       | Determiner / Last Name                          |
+| Your JSON key                                                | Also matches (via alias)                        |
+|--------------------------------------------------------------|-------------------------------------------------|
+| `stratigraphy`, `formation`, `member`, `group`, `bed`        | Paleo Context, Lithostratigraphy                |
+| `geologicalAge`, `age`, `period`, `epoch`, `era`             | Paleo Context, Chronostratigraphy               |
+| `systemPeriod`, `seriesEpoch`, `landMammalAge`, `faunalZone`, `zone` | Paleo Context, Chronostratigraphy / Biostratigraphy |
+| `lithostratigraphy`, `biostratigraphy`, `chronostratigraphy` | Paleo Context + the same-named tree             |
+| `locality`, `site`, `siteName`, `namedPlace`                 | Locality Name                                   |
+| `siteKey`                                                    | Station Field / Collector Number, Locality Code |
+| `latitude`, `longitude`                                      | `latitude1`, `longitude1`                       |
+| `collector`, `collectors`, `cataloger`, `preparator`, `preparedBy` | Agent picker, Last Name                   |
+| `determiner`                                                 | Determiner / Last Name                          |
+| `class`, `order`, `family`, `genus`, `species`, `scientificName` | Taxon (fallback when JSON omits the composite `taxon`) |
+| `natureOfSpecimen`, `specimenType`, `typeStatus`, `status`, `isPublished` | Determination / object-attribute fields when present in the form |
+| `startDateYear`, `collectionDate`, `dateCollected`           | Start Date                                      |
+| `endDateYear`                                                | End Date                                        |
+
+**Keys that have NO direct destination on the Collection Object form** —
+remove these from your JSON or leave them: they're silently skipped:
+
+- `country`, `state`, `province`, `county`, `continent` — these live in
+  the Geography tree, which is selected inside the Locality sub-form (one
+  level deeper than the COD). Plan to support that flow in a later
+  release.
+- `startDatePrecision`, `endDatePrecision` — derived by Specify from the
+  date itself; setting them via JSON has no effect.
+- Form-config-specific fields (e.g. `isPublished`, `objectStatus`) may
+  or may not exist on your collection's form. They map when the form
+  exposes them.
 
 #### "Crear «valor»" badge for unsaved tree entries
 
@@ -163,20 +183,50 @@ autocomplete **+ Add** when present — so you can create the new tree node
 without having to retype anything.
 
 #### 🤖 LLM Prompt for Paleontology Data Extraction (Copilot / ChatGPT / Gemini)
-You can use the following prompt to ask an AI assistant (like Microsoft Copilot) to extract paleontological specimen data from a scientific paper or text in the correct JSON format:
+
+You can use the following prompt to ask an AI assistant (Copilot, ChatGPT,
+Claude, Gemini) to extract paleontological specimen data from a paper, a
+field-museum portal record, or a label transcript:
 
 ```text
-Extract the paleontological specimen information from the text below. Format the output as a clean, flat JSON object. Use the following keys:
-- "catalogNumber" (for the catalog or specimen number, e.g. "MCNAM-PV 450")
-- "altCatalogNumber" (for the original or alternative catalog number from another collection, e.g. "MACN-A 10234")
-- "institution" (for the institution or collection of origin, e.g. "Museo Argentino de Ciencias Naturales")
-- "taxon" (for the scientific name of the fossil, e.g. "Carnotaurus sastrei")
-- "locality" (for the geographic site or fossil locality)
-- "stratigraphy" (for the geological formation, member, or bed, e.g. "La Colonia Formation")
-- "geologicalAge" (for the epoch, age, or era, e.g. "Late Cretaceous")
-- "collector" (for the person or expedition who collected the fossil)
-- "date" (for the date of collection/discovery in YYYY-MM-DD format)
-- "remarks" (for anatomical description, skeletal elements preserved, or general remarks, e.g. "Left femur and partial pelvis")
+Extract the paleontological specimen information from the text below.
+Format the output as a clean, flat JSON object. Use null for missing
+values; omit any key you cannot fill. Use these keys:
+
+Identifiers and institutional context:
+- "catalogNumber"           catalog / specimen number, e.g. "UF/VP 20047"
+- "altCatalogNumber"        original or alternative catalog number
+- "institution"             institution or collection of origin
+
+Taxonomy (provide the composite "taxon"; the hierarchy fields are
+optional and only fill in if the binomial cannot be inferred):
+- "taxon"                   binomial, e.g. "Borophagus pugnator"
+- "class", "order", "family", "genus", "species"  (optional fallback)
+- "typeStatus"              e.g. "Holotype", or null
+- "natureOfSpecimen"        anatomical description, e.g. "dentary, right and left with c, p2–m2"
+
+Locality (geographic name + coordinates; country/state/county are NOT
+yet mapped automatically — include them anyway for human review):
+- "locality"                site name, e.g. "Withlacoochee River 4X"
+- "siteKey"                 site code / station field number, e.g. "MR024"
+- "latitude", "longitude"   decimal degrees
+- "country", "state", "county", "continent"  (informational, not yet auto-filled)
+
+Stratigraphy and geological age (any of these match the Paleo Context
+picker; the more specific the better):
+- "formation", "member", "group", "bed"
+- "systemPeriod"            e.g. "Neogene"
+- "seriesEpoch"             e.g. "Miocene, late"
+- "landMammalAge"           e.g. "Hemphillian"
+- "faunalZone"              e.g. "Hh2"
+- "geologicalAge"           generic catch-all, e.g. "Late Cretaceous"
+
+Collecting event:
+- "collector"               person or expedition who collected the specimen
+- "startDate", "endDate"    YYYY-MM-DD; null if unknown
+
+Free-text:
+- "remarks"                 condition, display status, taphonomy, etc.
 
 Provide ONLY the raw JSON object, without markdown formatting.
 
@@ -184,7 +234,40 @@ Text:
 [PASTE TEXT OR PAPER HERE]
 ```
 
-#### Sample JSON Structure
+#### Sample JSON structure
+
+A real-world record (from the Florida Museum of Natural History
+Vertebrate Paleontology portal) that exercises most of the supported
+keys:
+
+```json
+{
+  "catalogNumber": "UF/VP 20047",
+  "institution": "Florida Museum of Natural History – Vertebrate Paleontology",
+  "taxon": "Borophagus pugnator",
+  "natureOfSpecimen": "dentary, right and left with c, p2–m2, associated",
+  "locality": "Withlacoochee River 4X",
+  "siteKey": "MR024",
+  "latitude": 28.987908,
+  "longitude": -82.347119,
+  "country": "USA",
+  "state": "Florida",
+  "county": "Marion",
+  "continent": "North America",
+  "systemPeriod": "Neogene",
+  "seriesEpoch": "Miocene, late",
+  "landMammalAge": "Hemphillian",
+  "faunalZone": "Hh2",
+  "formation": null,
+  "collector": null,
+  "startDate": "1974-11-30",
+  "endDate": null,
+  "remarks": "Associated right and left dentaries with c, p2–m2; specimen currently on display."
+}
+```
+
+A simpler example (the minimum set that maps cleanly today):
+
 ```json
 {
   "catalogNumber": "MCNAM-PV 450",
