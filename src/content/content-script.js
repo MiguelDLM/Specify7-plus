@@ -382,21 +382,76 @@
    * those keys explicitly.
    */
   const KEY_ALIASES = {
+    // Stratigraphy / chronostratigraphy: Specify funnels several concepts
+    // through one "Paleo Context" picker
     stratigraphy: ['paleocontext', 'lithostratigraphy', 'chronostratigraphy'],
     lithostratigraphy: ['paleocontext', 'lithostratigraphy'],
     biostratigraphy: ['paleocontext', 'biostratigraphy'],
     chronostratigraphy: ['paleocontext', 'chronostratigraphy'],
     formation: ['paleocontext', 'lithostratigraphy'],
     member: ['paleocontext', 'lithostratigraphy'],
+    group: ['paleocontext', 'lithostratigraphy'],
+    bed: ['paleocontext', 'lithostratigraphy'],
     geologicalage: ['paleocontext', 'chronostratigraphy'],
     age: ['paleocontext', 'chronostratigraphy'],
     period: ['paleocontext', 'chronostratigraphy'],
     epoch: ['paleocontext', 'chronostratigraphy'],
     era: ['paleocontext', 'chronostratigraphy'],
+    systemperiod: ['paleocontext', 'chronostratigraphy'],
+    seriesepoch: ['paleocontext', 'chronostratigraphy'],
+    landmammalage: ['paleocontext', 'biostratigraphy', 'chronostratigraphy'],
+    faunalzone: ['paleocontext', 'biostratigraphy'],
+    zone: ['paleocontext', 'biostratigraphy'],
+
+    // Locality auxiliaries — many JSON exports from other Specify
+    // instances or portals use "site" / "siteKey" / "latitude" instead
+    // of Specify's internal `localityName` / `stationFieldNumber` /
+    // `latitude1` field names.
+    locality: ['locality', 'localityname'],
+    site: ['locality', 'localityname'],
+    sitename: ['locality', 'localityname'],
+    sitekey: ['stationfieldnumber', 'localitycode', 'collectornumber'],
+    latitude: ['latitude1', 'lat'],
+    longitude: ['longitude1', 'lng', 'lon'],
+    namedplace: ['locality', 'localityname'],
+
+    // Agents
     collector: ['collectors', 'agent', 'lastname'],
     collectors: ['collectors', 'agent', 'lastname'],
-    locality: ['locality', 'localityname'],
     determiner: ['determiner', 'lastname'],
+    cataloger: ['cataloger', 'lastname'],
+    preparator: ['preparedby', 'lastname'],
+    preparedby: ['preparedby', 'lastname'],
+
+    // Taxonomy hierarchy — these are NOT separately mappable in most
+    // Specify Collection Object forms (the Taxon picker takes a single
+    // string against the tree). We alias them to `taxon` as a last
+    // resort so the picker still gets a value when the JSON omits the
+    // composite `taxon` key.
+    class: ['taxon', 'fullname'],
+    order: ['taxon', 'fullname'],
+    family: ['taxon', 'fullname'],
+    subfamily: ['taxon', 'fullname'],
+    tribe: ['taxon', 'fullname'],
+    genus: ['taxon', 'fullname'],
+    subgenus: ['taxon', 'fullname'],
+    species: ['taxon', 'fullname'],
+    scientificname: ['taxon', 'fullname'],
+
+    // Specimen attributes
+    natureofspecimen: ['naturedescription', 'description', 'preservation'],
+    specimentype: ['typestatus', 'type'],
+    typestatus: ['typestatus'],
+    isondisplay: ['onloan', 'available'],
+    ispublished: ['ispublished', 'published'],
+    objectstatus: ['inventorystatus', 'objectcondition'],
+    status: ['inventorystatus', 'objectcondition'],
+
+    // Dates
+    startdateyear: ['startdate'],
+    enddateyear: ['enddate'],
+    collectiondate: ['startdate'],
+    datecollected: ['startdate'],
   };
 
   /**
@@ -536,6 +591,27 @@
     if (!input || value === undefined || value === null) return;
 
     input.focus();
+
+    // Force-clear any existing content first via the native React-aware
+    // setter. Without this, when the input was previously populated
+    // (Specify default, prior fill, or React-controlled re-render),
+    // execCommand 'insertText' below can APPEND instead of replace —
+    // which produced concatenated nonsense in the Other Identifiers
+    // Remarks textarea (e.g. "Associated...1974-11-302001-01-01").
+    if (input.value && (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT')) {
+      try {
+        const isTextArea = input.tagName === 'TEXTAREA';
+        const clearSetter = isTextArea
+          ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+          : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        if (clearSetter) {
+          clearSetter.call(input, '');
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      } catch (e) {
+        // Ignore — execCommand path below will still try to overwrite.
+      }
+    }
 
     // Try to use execCommand to simulate user typing - this is best for React/Specify
     try {
