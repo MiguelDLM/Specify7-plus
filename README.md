@@ -190,7 +190,7 @@ field-museum portal record, or a label transcript:
 
 ```text
 Extract the paleontological specimen information from the text below.
-Format the output as a clean, flat JSON object. Use null for missing
+Format the output as a clean, JSON object. Use null for missing
 values; omit any key you cannot fill. Use these keys:
 
 Identifiers and institutional context:
@@ -228,10 +228,7 @@ Collecting event:
 Free-text:
 - "remarks"                 condition, display status, taphonomy, etc.
 
-Provide ONLY the raw JSON object, without markdown formatting.
-
-Text:
-[PASTE TEXT OR PAPER HERE]
+Provide ONLY the raw JSON object
 ```
 
 #### Sample JSON structure
