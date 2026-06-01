@@ -399,7 +399,9 @@
     era: ['paleocontext', 'chronostratigraphy'],
     systemperiod: ['paleocontext', 'chronostratigraphy'],
     seriesepoch: ['paleocontext', 'chronostratigraphy'],
-    landmammalage: ['paleocontext', 'biostratigraphy', 'chronostratigraphy'],
+    // Land-mammal age / faunal zone are BIOstratigraphy, never chronostrat —
+    // the Chronostratigraphy field takes Series/Epoch or System/Period.
+    landmammalage: ['paleocontext', 'biostratigraphy'],
     faunalzone: ['paleocontext', 'biostratigraphy'],
     zone: ['paleocontext', 'biostratigraphy'],
 
@@ -440,7 +442,10 @@
 
     // Specimen attributes
     natureofspecimen: ['naturedescription', 'description', 'preservation'],
-    specimentype: ['typestatus', 'type'],
+    // Map straight to the determination's "Type Status" picklist. The old
+    // broad `type` alias leaked the value onto unrelated fields (prepType,
+    // ReferenceWorkType), leaving Type Status empty.
+    specimentype: ['typestatus'],
     typestatus: ['typestatus'],
     isondisplay: ['onloan', 'available'],
     ispublished: ['ispublished', 'published'],
@@ -453,6 +458,41 @@
     collectiondate: ['startdate'],
     datecollected: ['startdate'],
   };
+
+  // An alias hit scores slightly below a literal-key hit (see getMatchScore).
+  const ALIAS_PENALTY = 0.9;
+
+  // Tie-breaker for when several JSON keys alias to the SAME Specify field
+  // and therefore score identically — most of the stratigraphy/age vocabulary
+  // funnels through the single "Paleo Context" picker. Lower number = more
+  // preferred. Keys not listed fall back to DEFAULT_PRIORITY. This encodes:
+  //   • Paleo Context *name* is the lithostratigraphic unit (the formation),
+  //     not the geological age — so "Liushu Formation" wins over "Neogene".
+  //   • Chronostratigraphy takes the finer Series/Epoch, then System/Period.
+  //   • Land-mammal age / faunal zone are Biostratigraphy.
+  const DEFAULT_PRIORITY = 50;
+  const KEY_PRIORITY = {
+    // Composite taxon beats the individual rank fields for the Taxon picker.
+    taxon: 0, scientificname: 0,
+    // Lithostratigraphy → also the Paleo Context context name.
+    formation: 1, lithostratigraphy: 1,
+    member: 2, group: 2, bed: 2,
+    // Biostratigraphy.
+    landmammalage: 3, faunalzone: 4, zone: 5,
+    // Chronostratigraphy: prefer Series/Epoch over System/Period.
+    seriesepoch: 6, systemperiod: 7,
+    geologicalage: 8, series: 8, epoch: 8, period: 9, era: 9, age: 9,
+    // Umbrella keys lose to anything more specific.
+    chronostratigraphy: 20, biostratigraphy: 20, stratigraphy: 21,
+    // Rank fields are last-resort Taxon fillers.
+    genus: 30, species: 30, subgenus: 31,
+    class: 40, order: 40, family: 40, subfamily: 40, tribe: 40,
+  };
+
+  function keyPriority(key) {
+    const k = normalizeString(key);
+    return KEY_PRIORITY[k] != null ? KEY_PRIORITY[k] : DEFAULT_PRIORITY;
+  }
 
   /**
    * Calculates a match score between an input field and a JSON key.
@@ -468,15 +508,6 @@
     const normAria = normalizeString(input.getAttribute('aria-label'));
     const normTitle = normalizeString(input.getAttribute('title'));
     const normPlaceholder = normalizeString(input.getAttribute('placeholder'));
-
-    // Build the search keys: the literal normalized key plus any aliases.
-    // We pick the highest score across all of them.
-    const candidateKeys = new Set([normKey]);
-    for (const alias of (KEY_ALIASES[normKey] || [])) {
-      candidateKeys.add(alias);
-    }
-
-    let bestScore = 0;
 
     const checkMatch = (normVal, baseScore, targetKey) => {
       if (!normVal) return 0;
@@ -494,16 +525,30 @@
       return 0;
     };
 
-    // aria-label is Specify's canonical label for combobox pickers — weight
-    // it just below `name` because Specify often leaves `name` empty on
-    // headlessui-rendered comboboxes (taxon, locality, paleo context, etc.).
-    for (const ck of candidateKeys) {
-      bestScore = Math.max(bestScore, checkMatch(normName, 10, ck));
-      bestScore = Math.max(bestScore, checkMatch(normAria, 9.5, ck));
-      bestScore = Math.max(bestScore, checkMatch(normId, 9, ck));
-      bestScore = Math.max(bestScore, checkMatch(normLabel, 8, ck));
-      bestScore = Math.max(bestScore, checkMatch(normTitle, 7, ck));
-      bestScore = Math.max(bestScore, checkMatch(normPlaceholder, 6, ck));
+    // Score one target key against all of the input's identifying attributes
+    // and take the best attribute hit. aria-label is Specify's canonical
+    // label for combobox pickers — weight it just below `name` because
+    // Specify often leaves `name` empty on headlessui-rendered comboboxes
+    // (taxon, locality, paleo context, etc.).
+    const scoreTarget = (targetKey) => {
+      let s = 0;
+      s = Math.max(s, checkMatch(normName, 10, targetKey));
+      s = Math.max(s, checkMatch(normAria, 9.5, targetKey));
+      s = Math.max(s, checkMatch(normId, 9, targetKey));
+      s = Math.max(s, checkMatch(normLabel, 8, targetKey));
+      s = Math.max(s, checkMatch(normTitle, 7, targetKey));
+      s = Math.max(s, checkMatch(normPlaceholder, 6, targetKey));
+      return s;
+    };
+
+    // A hit on the literal JSON key always outranks a hit that only came
+    // through an alias. Without this, broad rank/strat aliases steal a field
+    // from the more specific key the user actually meant: e.g. `class`
+    // ("Mammalia") aliases to `taxon` and would otherwise tie — and win by
+    // JSON order — against the real composite `taxon` ("Ursavus tedfordi").
+    let bestScore = scoreTarget(normKey);
+    for (const alias of (KEY_ALIASES[normKey] || [])) {
+      bestScore = Math.max(bestScore, scoreTarget(alias) * ALIAS_PENALTY);
     }
 
     return bestScore;
@@ -903,7 +948,10 @@
 
     for (const key of keys) {
       const score = getMatchScore(input, key, labelText);
-      if (score > bestScore && score >= 1.5) {
+      if (score < 1.5) continue;
+      // Higher score wins; on a tie, the lower keyPriority wins (so the
+      // context-name picker keeps `formation` over `systemPeriod`, etc.).
+      if (score > bestScore || (score === bestScore && bestKey && keyPriority(key) < keyPriority(bestKey))) {
         bestScore = score;
         bestKey = key;
       }
@@ -1688,9 +1736,14 @@
     }
 
     // Phase 1: greedy assignment by score — best (key, input) pairs win first,
-    // then both sides drop out of the pool. This is the same matching logic
-    // we had before; only the *execution* order changes below.
-    candidates.sort((a, b) => b.score - a.score);
+    // then both sides drop out of the pool. Ties (many keys funnel through one
+    // Paleo Context picker and score identically) are broken by keyPriority so
+    // the semantically-right key wins instead of whichever came first in the
+    // JSON — e.g. `formation` beats `systemPeriod` for the context name.
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return keyPriority(a.key) - keyPriority(b.key);
+    });
 
     const assignments = [];
     const claimedInputs = new Set();

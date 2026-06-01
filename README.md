@@ -145,9 +145,9 @@ aliases:
 
 | Your JSON key                                                | Also matches (via alias)                        |
 |--------------------------------------------------------------|-------------------------------------------------|
-| `stratigraphy`, `formation`, `member`, `group`, `bed`        | Paleo Context, Lithostratigraphy                |
-| `geologicalAge`, `age`, `period`, `epoch`, `era`             | Paleo Context, Chronostratigraphy               |
-| `systemPeriod`, `seriesEpoch`, `landMammalAge`, `faunalZone`, `zone` | Paleo Context, Chronostratigraphy / Biostratigraphy |
+| `formation`, `member`, `group`, `bed`, `stratigraphy`        | Paleo Context **context name** (lithostratigraphic unit) + Lithostratigraphy |
+| `seriesEpoch`, `systemPeriod`, `geologicalAge`, `age`, `period`, `epoch`, `era` | Chronostratigraphy (prefers the finer Series/Epoch, then System/Period) |
+| `landMammalAge`, `faunalZone`, `zone`                        | Biostratigraphy                                 |
 | `lithostratigraphy`, `biostratigraphy`, `chronostratigraphy` | Paleo Context + the same-named tree             |
 | `locality`, `site`, `siteName`, `namedPlace`                 | Locality Name                                   |
 | `siteKey`                                                    | Station Field / Collector Number, Locality Code |
