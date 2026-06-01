@@ -14,7 +14,8 @@
  */
 
 import * as THREE from '../../lib/three/three.module.js';
-import { OrbitControls } from '../../lib/three/jsm/OrbitControls.js';
+import { OrbitControls }     from '../../lib/three/jsm/OrbitControls.js';
+import { TrackballControls } from '../../lib/three/jsm/TrackballControls.js';
 import { STLLoader }     from '../../lib/three/jsm/STLLoader.js';
 import { OBJLoader }     from '../../lib/three/jsm/OBJLoader.js';
 import { PLYLoader }     from '../../lib/three/jsm/PLYLoader.js';
@@ -27,6 +28,11 @@ const metadataParam = urlParams.get('metadata');
 
 // ─── Three.js globals ─────────────────────────────────────────────────────────
 let scene, camera, renderer, controls;
+// 'orbit'     → OrbitControls: keeps a fixed +Y up, clamps the polar angle to
+//               [0, π] (can feel "stuck" near the poles). This is the default.
+// 'trackball' → TrackballControls: unrestricted free rotation in any direction,
+//               no pole locking. Opt-in via the toolbar toggle.
+let controlMode = 'orbit';
 let meshGroup   = null;      // the loaded model group
 let ambientLight, dirLight1, dirLight2;
 let initialCamPos, initialCamTarget;
@@ -183,13 +189,8 @@ function initThree() {
     dirLight3.position.set(0, -5, 0);
     scene.add(dirLight3);
 
-    // Controls
-    controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping    = true;
-    controls.dampingFactor    = 0.08;
-    controls.rotateSpeed      = 0.8;
-    controls.zoomSpeed        = 1.2;
-    controls.screenSpacePanning = true;
+    // Controls (default: OrbitControls — same behavior as before)
+    setControls(controlMode);
 
     // Resize
     window.addEventListener('resize', onResize);
@@ -203,10 +204,47 @@ function initThree() {
     animate();
 }
 
+// Build (or rebuild) the active controls. Disposes the previous instance so
+// its DOM listeners don't linger, and carries the current orbit target across
+// so the view doesn't jump when switching modes. The camera object itself is
+// shared, so its position/orientation are preserved automatically.
+function setControls(mode) {
+    const prevTarget = controls ? controls.target.clone() : null;
+    if (controls) controls.dispose();
+
+    controlMode = mode;
+    controls = (mode === 'trackball')
+        ? new TrackballControls(camera, renderer.domElement)
+        : new OrbitControls(camera, renderer.domElement);
+
+    if (mode === 'trackball') {
+        // TrackballControls has no enableDamping/screenSpacePanning; it uses
+        // dynamicDampingFactor and a higher rotateSpeed feels natural here.
+        controls.rotateSpeed          = 3.0;
+        controls.zoomSpeed            = 1.2;
+        controls.panSpeed             = 0.8;
+        controls.dynamicDampingFactor = 0.15;
+        controls.staticMoving         = false;
+    } else {
+        controls.enableDamping      = true;
+        controls.dampingFactor      = 0.08;
+        controls.rotateSpeed        = 0.8;
+        controls.zoomSpeed          = 1.2;
+        controls.screenSpacePanning = true;
+    }
+
+    if (prevTarget) controls.target.copy(prevTarget);
+    // TrackballControls needs viewport dimensions to map pointer deltas.
+    if (typeof controls.handleResize === 'function') controls.handleResize();
+    controls.update();
+}
+
 function onResize() {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
+    // TrackballControls caches the screen rectangle; refresh it on resize.
+    if (controls && typeof controls.handleResize === 'function') controls.handleResize();
     resizeMeasureCanvas();
 }
 
@@ -529,10 +567,22 @@ function initSettingsPanel() {
         });
     }
 
+    // Rotation mode toggle (guided OrbitControls ↔ free TrackballControls)
+    const rotationBtn = document.getElementById('rotation-mode-btn');
+    if (rotationBtn) {
+        rotationBtn.addEventListener('click', () => {
+            setControls(controlMode === 'orbit' ? 'trackball' : 'orbit');
+            rotationBtn.textContent = controlMode === 'trackball'
+                ? '⟳ Rotation: Free'
+                : '⟳ Rotation: Guided';
+        });
+    }
+
     // Reset camera
     document.getElementById('reset-camera-btn').addEventListener('click', () => {
         if (!initialCamPos) return;
         camera.position.copy(initialCamPos);
+        camera.up.set(0, 1, 0);
         controls.target.copy(initialCamTarget);
         controls.update();
     });
