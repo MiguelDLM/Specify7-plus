@@ -176,8 +176,10 @@
       
       await navigator.clipboard.writeText(JSON.stringify(clipboardData));
 
-      // Save to storage so other tabs know what data is available
-      if (chrome && chrome.storage && chrome.storage.local) {
+      // Save to storage so other tabs know what data is available.
+      // chrome.runtime.id is undefined once the extension is reloaded and this
+      // script is orphaned — guard against "Extension context invalidated".
+      if (chrome && chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local) {
         chrome.storage.local.set({ lastCapturedSpecimen: clipboardData });
       }
       
@@ -197,7 +199,7 @@
   }
 
   // Initialize
-  if (chrome && chrome.storage && chrome.storage.sync) {
+  if (chrome && chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.sync) {
     chrome.storage.sync.get(['enabledFeatures'], (result) => {
       const features = result.enabledFeatures || { dataCapture: true };
       if (features.dataCapture !== false) {

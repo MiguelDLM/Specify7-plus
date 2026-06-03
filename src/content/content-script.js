@@ -20,9 +20,26 @@
     // Keep track of the last captured data to know which buttons to show
     let lastCapturedData = null;
 
+    /**
+     * True only while the background extension context is still alive. After
+     * the extension is reloaded/updated, content scripts already injected into
+     * open tabs become orphaned, and ANY chrome.* call ("chrome.runtime.getURL",
+     * "chrome.storage.local.set", …) throws "Extension context invalidated".
+     * `chrome.runtime.id` is undefined in that orphaned state, so checking it
+     * lets us fail soft instead of throwing an uncaught error. The fix on the
+     * user's side is simply to reload the Specify page.
+     */
+    function isExtensionContextValid() {
+      try {
+        return !!(chrome && chrome.runtime && chrome.runtime.id);
+      } catch (e) {
+        return false;
+      }
+    }
+
     // Load feature states and last captured data from storage
     function loadFeatureStates() {
-    if (chrome && chrome.storage) {
+    if (isExtensionContextValid() && chrome.storage) {
       // Load enabled features
       if (chrome.storage.sync) {
         chrome.storage.sync.get(['enabledFeatures'], (result) => {
@@ -1680,7 +1697,7 @@
 
     // 1. Clear previous captured data to avoid mixing old data with the new JSON data
     lastCapturedData = {};
-    if (chrome && chrome.storage && chrome.storage.local) {
+    if (isExtensionContextValid() && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ lastCapturedSpecimen: {} });
     }
 
@@ -1783,7 +1800,7 @@
     for (const key in flatData) {
       lastCapturedData[key] = flatData[key];
     }
-    if (chrome && chrome.storage && chrome.storage.local) {
+    if (isExtensionContextValid() && chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({ lastCapturedSpecimen: lastCapturedData });
     }
 
@@ -2327,6 +2344,11 @@
         }
       } catch (e) {
         console.warn('Specify7+: Could not extract specimen info from page', e);
+      }
+
+      if (!isExtensionContextValid()) {
+        showMessage('Specify7+ was updated or reloaded. Please refresh this page to open the 3D viewer.', 'warning');
+        return;
       }
 
       let viewerUrl = chrome.runtime.getURL('src/viewer/viewer.html') +

@@ -10,38 +10,61 @@ class BibtexParser {
    */
   static parse(bibtexString) {
     const entries = [];
-    
-    // Regex to find BibTeX entries
-    // Format: @type{key, field1 = {value1}, field2 = {value2}, ...}
-    const entryRegex = /@(\w+)\s*{\s*([^,]+)\s*,\s*([\s\S]*?)\n\s*}/gi;
-    
-    let match;
-    while ((match = entryRegex.exec(bibtexString)) !== null) {
-      const [, entryType, citationKey, fieldsString] = match;
-      
+
+    // Find each entry start (`@type{`) and walk the string counting braces to
+    // locate its matching close. This is robust to entries written on a single
+    // line (the previous regex required a newline before the closing brace, so
+    // one-line BibTeX pasted from a web page parsed as zero entries) and to
+    // nested braces inside field values.
+    const startRegex = /@(\w+)\s*\{/g;
+
+    let start;
+    while ((start = startRegex.exec(bibtexString)) !== null) {
+      const entryType = start[1];
+      const bodyStart = startRegex.lastIndex; // index just after the opening '{'
+
+      // Scan for the brace that closes this entry.
+      let depth = 1;
+      let i = bodyStart;
+      for (; i < bibtexString.length && depth > 0; i++) {
+        const ch = bibtexString[i];
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+      }
+      if (depth !== 0) break; // unbalanced — give up on the rest
+
+      const body = bibtexString.slice(bodyStart, i - 1); // contents, sans final '}'
+      // Resume the outer search past this entry.
+      startRegex.lastIndex = i;
+
+      // The body is "citationKey, field = value, field = value, ...".
+      const commaIdx = body.indexOf(',');
+      if (commaIdx === -1) continue; // no fields — nothing useful to import
+
       const entry = {
         type: entryType.toLowerCase(),
-        citationKey: citationKey.trim(),
+        citationKey: body.slice(0, commaIdx).trim(),
         fields: {}
       };
-      
-      // Parse the fields
+
+      const fieldsString = body.slice(commaIdx + 1);
+
+      // Parse the fields. Value can be in braces {}, quotes "", or a bare token.
       const fieldRegex = /(\w+)\s*=\s*(?:{([^{}]*(?:{[^{}]*}[^{}]*)*)}|"([^"]*)"|(\w+))\s*,?/gi;
-      
+
       let fieldMatch;
       while ((fieldMatch = fieldRegex.exec(fieldsString)) !== null) {
         const fieldName = fieldMatch[1].toLowerCase();
-        // The value can be in braces {}, quotes "", or be a number
         const fieldValue = fieldMatch[2] || fieldMatch[3] || fieldMatch[4];
-        
+
         if (fieldValue) {
           entry.fields[fieldName] = this.cleanValue(fieldValue);
         }
       }
-      
+
       entries.push(entry);
     }
-    
+
     return entries;
   }
   
@@ -62,6 +85,15 @@ class BibtexParser {
       .replace(/\\~{([^}]*)}/g, '$1')
       .replace(/\\_/g, '_')
       .replace(/\\&/g, '&')
+      // Decode HTML entities — BibTeX copied from a web page often arrives with
+      // encoded characters (e.g. a DOI's "<" / ">" as &#60; / &#62;).
+      .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;/gi, "'")
+      .replace(/&amp;/gi, '&')
       // Remove extra braces
       .replace(/[{}]/g, '')
       // Normalize spaces
