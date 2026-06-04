@@ -153,3 +153,15 @@ body {
 .footer a:hover {
   text-decoration: underline;
 }
+
+.disclaimer {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  opacity: 0.95;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px dashed rgba(255, 255, 255, 0.35);
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+}

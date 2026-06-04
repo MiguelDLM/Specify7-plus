@@ -1,0 +1,30 @@
+name: Package Extension
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create Zip Archive
+        run: |
+          zip -r Specify7-plus.zip manifest.json icons/ lib/ src/ LICENSE README.md
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: specify7-plus-extension
+          path: Specify7-plus.zip
