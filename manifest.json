@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Specify7+",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Specify7+ — import bibliography and view 3D models inside Specify 7",
   "permissions": [
     "activeTab",
@@ -15,18 +15,19 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/utils/bibtex-parser.js", "src/content/content-script.js"],
+      "js": [
+        "src/utils/bibtex-parser.js",
+        "src/content/namespace.js",
+        "src/content/helpers.js",
+        "src/content/matcher.js",
+        "src/content/form-utils.js",
+        "src/content/bibtex-doi.js",
+        "src/content/json-importer.js",
+        "src/content/model-viewer.js",
+        "src/content/query-tools.js",
+        "src/content/main.js"
+      ],
       "css": ["src/content/content-styles.css"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["*://morphomuseum.com/specimenfiles/*"],
-      "js": ["src/content/morphomuseum.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["*://www.morphosource.org/*"],
-      "js": ["src/content/morphosource.js"],
       "run_at": "document_idle"
     }
   ],
