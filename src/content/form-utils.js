@@ -19,10 +19,66 @@
     return '';
   };
 
+  // Resolves a desired value against a <select>'s real <option> list and
+  // selects the matching one. Assigning `select.value = "Holotype"` directly
+  // is a silent no-op unless an option literally has value="Holotype" — but
+  // Specify's dropdowns (Type Status, Reference Work type, agent type, …) carry
+  // ids or localized labels as option values, so JSON/DOI imports never set
+  // them. We match by option value first, then exact visible text, then a
+  // normalized (accent/stopword-insensitive) comparison, and finally a partial
+  // match as a last resort.
+  App.setSelectValue = function(select, value) {
+    if (!select || value === undefined || value === null) return false;
+    const wanted = value.toString().trim();
+    if (!wanted) return false;
+
+    const options = Array.from(select.options);
+    const norm = s => App.normalizeString(s);
+    const nWanted = norm(wanted);
+    const lWanted = wanted.toLowerCase();
+
+    let match =
+      options.find(o => o.value === wanted) ||
+      options.find(o => (o.textContent || '').trim().toLowerCase() === lWanted) ||
+      options.find(o => (norm(o.value) === nWanted && nWanted) || (norm(o.textContent) === nWanted && nWanted));
+
+    if (!match && nWanted) {
+      match = options.find(o => {
+        const nv = norm(o.value);
+        const nt = norm(o.textContent);
+        return (nv && (nv.includes(nWanted) || nWanted.includes(nv))) ||
+               (nt && (nt.includes(nWanted) || nWanted.includes(nt)));
+      });
+    }
+
+    if (!match) {
+      console.warn('Specify7+: No matching <option> for select value:', wanted);
+      return false;
+    }
+
+    try {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+      if (setter) setter.call(select, match.value);
+      else select.value = match.value;
+    } catch (e) {
+      select.value = match.value;
+    }
+    select.dispatchEvent(new Event('input', { bubbles: true }));
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  };
+
   App.setSafeValue = async function(input, value) {
     if (!input || value === undefined || value === null) return;
 
     input.focus();
+
+    // Dropdowns need option resolution, not raw value assignment (see above).
+    if (input.tagName === 'SELECT') {
+      App.setSelectValue(input, value);
+      input.classList.remove('not-touched');
+      return;
+    }
 
     if (input.value && (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT')) {
       try {
@@ -83,6 +139,15 @@
 
     if (input.getAttribute('role') === 'combobox') {
       const originalValue = value;
+
+      // Nudge Specify's autocomplete so it actually runs its query and lists
+      // existing matches (agents, taxa, journals). Some pickers only fetch
+      // results in response to keyboard activity; without this a plain value
+      // assignment can leave the list showing only "Add", which made every
+      // author/agent look new even when a matching one already existed.
+      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'a' }));
+      input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
+
       const preventClearing = (e) => {
         e.stopImmediatePropagation();
         input.removeEventListener('blur', preventClearing, true);
@@ -204,6 +269,81 @@
 
   App.isTreePickInput = function(input) {
     return !!(input && input.getAttribute('role') === 'combobox');
+  };
+
+  // True when a combobox is an Agent picker (author, collector, determiner,
+  // cataloger, preparator, …). Agent pickers need a last-name search key rather
+  // than a fully-formatted "Last, First" string to surface existing agents.
+  // Note: intentionally excludes the plural "determination(s)" heading so the
+  // taxon picker inside a Determinations subform is NOT treated as an agent —
+  // only the determiner/"determined by" agent field is.
+  App.AGENT_FIELD_WORDS = /\b(agent|agente|author|autor|collector|colector|determiner|determined|determinador|cataloger|catalogador|preparator|preparador|receiver|remitente|donor|donante)\b/i;
+
+  App.isAgentInput = function(input) {
+    if (!input || input.getAttribute('role') !== 'combobox') return false;
+    const hay = [
+      input.getAttribute('name'),
+      input.getAttribute('aria-label'),
+      input.getAttribute('title'),
+      input.getAttribute('placeholder'),
+      App.getInputLabelText(input)
+    ].filter(Boolean).join(' ');
+
+    if (App.AGENT_FIELD_WORDS.test(hay)) return true;
+
+    // Fall back to the enclosing subform heading (e.g. an "Authors" or
+    // "Determinations" fieldset), since the individual agent row often has only
+    // a generic combobox with no descriptive label.
+    const fs = input.closest('fieldset');
+    const heading = fs ? (fs.querySelector('h3, h4, legend') || {}).textContent || '' : '';
+    return App.AGENT_FIELD_WORDS.test(heading);
+  };
+
+  // Reduces a person-name value to the search key Specify's agent autocomplete
+  // matches reliably: the last name. A stored agent formatted "Smith, John, R."
+  // is not matched by typing the whole "Smith, John" string in some Specify
+  // configurations, so the picker only offered "Add". The last name alone is
+  // the broadest reliable prefix match; the full name is still remembered
+  // elsewhere for pre-filling a create-agent dialog.
+  App.agentSearchKey = function(value) {
+    const str = (value == null ? '' : value.toString()).trim();
+    if (!str) return str;
+    // "Last, First" → "Last"
+    if (str.includes(',')) return str.split(',')[0].trim() || str;
+    return str;
+  };
+
+  // Locates the "Journal" tree-picker combobox of a Reference Work form.
+  // The field only carries a localized label/title (e.g. "Journal", "Revista",
+  // "Publicación"), so matching on the English word alone misses Spanish UIs —
+  // which is why the journal/publication name was not being filled from a DOI.
+  App.JOURNAL_FIELD_WORDS = /journal|revista|periodico|publicacion|diario|serie/;
+
+  App.findJournalInput = function(root = document) {
+    const combos = Array.from(root.querySelectorAll('input[role="combobox"]'));
+    for (const c of combos) {
+      const hay = App.normalizeString([
+        c.getAttribute('title'),
+        c.getAttribute('aria-label'),
+        c.getAttribute('placeholder'),
+        App.getInputLabelText(c)
+      ].filter(Boolean).join(' '));
+      if (App.JOURNAL_FIELD_WORDS.test(hay)) return c;
+    }
+    return null;
+  };
+
+  // Waits up to `timeout` ms for the Journal combobox to appear. Selecting the
+  // "Paper" reference type re-renders the form asynchronously, so the field is
+  // frequently absent on the first synchronous lookup.
+  App.waitForJournalInput = async function(timeout = 2500) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const input = App.findJournalInput();
+      if (input) return input;
+      await App.sleep(100);
+    }
+    return null;
   };
 
   App.injectPasteButton = function(input) {

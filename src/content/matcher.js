@@ -93,20 +93,36 @@
     const titleLower = (input.getAttribute('title') || '').toLowerCase();
     const headingLower = heading.toLowerCase();
 
-    // 1. Differentiate between sub-pickers in Paleo Context (Litho/Bio/Chrono)
-    const isLithoInput = labelLower.includes('litho') || labelLower.includes('lito') || nameLower.includes('litho') || nameLower.includes('lito') || ariaLower.includes('litho') || ariaLower.includes('lito') || titleLower.includes('litho') || titleLower.includes('lito') || labelLower.includes('formacion') || labelLower.includes('formation') || labelLower.includes('miembro') || labelLower.includes('member');
-    const isBioInput = labelLower.includes('bio') || nameLower.includes('bio') || ariaLower.includes('bio') || titleLower.includes('bio');
-    const isChronoInput = labelLower.includes('chrono') || labelLower.includes('crono') || nameLower.includes('chrono') || nameLower.includes('crono') || ariaLower.includes('chrono') || ariaLower.includes('crono') || titleLower.includes('chrono') || titleLower.includes('crono') || labelLower.includes('edad') || labelLower.includes('age') || labelLower.includes('period') || labelLower.includes('epoch') || labelLower.includes('era');
+    // 1. Differentiate between sub-pickers in Paleo Context (Litho/Bio/Chrono).
+    //    Match on whole words only: substring matching wrongly flags fields like
+    //    "Storage"/"Image" (contain "age") or "Mineral" (contains "era") as
+    //    chronostratigraphy and then blocks every other key from filling them.
+    const geoHaystack = `${labelLower} ${nameLower} ${ariaLower} ${titleLower}`;
+    const hasWord = (word) => new RegExp(`(^|[^a-z])${word}([^a-z]|$)`).test(geoHaystack);
 
-    if (isLithoInput) {
+    // Order matters: a "Land Mammal Age" field reads as bio, not chrono, so the
+    // bio test is evaluated before the chrono test and the kinds are exclusive.
+    let geoKind = null;
+    if (hasWord('litho') || hasWord('lito') || hasWord('formation') || hasWord('formacion') ||
+        hasWord('member') || hasWord('miembro') || hasWord('group') || hasWord('grupo') ||
+        hasWord('bed')) {
+      geoKind = 'litho';
+    } else if (hasWord('bio') || hasWord('biostratigraphy') || hasWord('bioestratigrafia') ||
+               hasWord('faunal') || hasWord('mammal') || hasWord('zone')) {
+      geoKind = 'bio';
+    } else if (hasWord('chrono') || hasWord('crono') || hasWord('age') || hasWord('edad') ||
+               hasWord('period') || hasWord('periodo') || hasWord('epoch') || hasWord('epoca') ||
+               hasWord('era') || hasWord('series') || hasWord('serie')) {
+      geoKind = 'chrono';
+    }
+
+    if (geoKind === 'litho') {
       const lithoKeys = ['formation', 'member', 'group', 'bed', 'lithostratigraphy'];
       if (!lithoKeys.includes(normKey)) return 0;
-    }
-    if (isBioInput) {
+    } else if (geoKind === 'bio') {
       const bioKeys = ['landmammalage', 'faunalzone', 'zone', 'biostratigraphy'];
       if (!bioKeys.includes(normKey)) return 0;
-    }
-    if (isChronoInput) {
+    } else if (geoKind === 'chrono') {
       const chronoKeys = ['systemperiod', 'seriesepoch', 'geologicalage', 'age', 'period', 'epoch', 'era', 'chronostratigraphy'];
       if (!chronoKeys.includes(normKey)) return 0;
     }
@@ -132,17 +148,20 @@
     // 3. Restrict general remarks/description to the main form, avoiding subforms
     const isGeneralRemarkKey = normKey === 'remarks' || normKey === 'description';
     if (isGeneralRemarkKey) {
-      const isSubform = headingLower.includes('locality') || 
-                        headingLower.includes('localidad') || 
-                        headingLower.includes('paleo') || 
-                        headingLower.includes('geolog') || 
-                        headingLower.includes('estratig') ||
-                        headingLower.includes('collecting') || 
-                        headingLower.includes('colecta') || 
-                        headingLower.includes('determina') ||
-                        headingLower.includes('prepara') ||
-                        headingLower.includes('other identifier') ||
-                        headingLower.includes('otros identif');
+      const subformHeadings = [
+        'locality', 'localidad',
+        'paleo', 'geolog', 'estratig', 'stratig',
+        'collecting', 'colecta',
+        'determina',
+        'prepara',
+        'attribute', 'atributo',
+        'host', 'hospedador',
+        'taphonom', 'tafonom',
+        'other identifier', 'otros identif',
+        'relationship', 'relacion',
+        'component', 'componente'
+      ];
+      const isSubform = subformHeadings.some(h => headingLower.includes(h));
       if (isSubform) return 0;
     }
 
@@ -239,64 +258,9 @@
     return '';
   };
 
-  App.findFieldKey = function(input) {
-    const name = input.getAttribute('name');
-    if (name) {
-      if (name === 'catalogNumber') return 'inventoryNumber';
-      if (name === 'altCatalogNumber') return 'inventoryNumber';
-      if (name === 'identifier') return 'inventoryNumber';
-      if (name === 'institution') return 'collection';
-      if (name === 'remarks') return 'description';
-      if (name === 'stationFieldNumber') return 'inventoryNumber';
-      if (name === 'verbatimDate') return 'dateCreated';
-    }
-
-    const label = document.querySelector(`label[for="${input.id}"]`);
-    if (label) {
-      const text = label.textContent.trim().toLowerCase();
-      if (text === 'catalog number' || text === 'numero de catalogo' || text === 'nº de catalogo' || text === 'nº catalogo' || text === 'no. catalogo' || text === 'no. de catálogo') return 'inventoryNumber';
-      if (text === 'alt cat number' || text === 'alt catalogo') return 'inventoryNumber';
-      if (text === 'identifier' || text === 'identificador') return 'inventoryNumber';
-      if (text === 'institution' || text === 'institucion' || text === 'institución') return 'collection';
-      if ((text === 'remarks' || text === 'observaciones' || text === 'comentarios' || text === 'notas') && input.tagName === 'TEXTAREA') return 'description';
-      if (text === 'taxon' || text === 'taxón') return 'taxon';
-      if (text === 'genus' || text === 'genero' || text === 'género') return 'genus';
-      if (text === 'species' || text === 'especie') return 'species';
-      if (text === 'locality' || text === 'locality name' || text === 'localidad' || text === 'nombre de la localidad') return 'origin';
-      if (text === 'prepared by' || text === 'preparado por' || text === 'preparador') return 'creator';
-      if (text === 'prepared date' || text === 'fecha de preparacion') return 'dateCreated';
-      if (text === 'determined date' || text === 'fecha de determinación') return 'dateCreated';
-      if (text === 'start date' || text === 'fecha de inicio') return 'dateCreated';
-      if (text === 'cataloged date' || text === 'fecha de catalogación') return 'dateCreated';
-      if (text === 'method' || text === 'metodo' || text === 'método') return 'method';
-      if (text === 'count' || text === 'conteo' || text === 'cantidad') return 'count';
-    }
-
-    const aria = (input.getAttribute('aria-label') || '').trim().toLowerCase();
-    if (aria) {
-      if (aria === 'taxon' || aria === 'taxón') return 'taxon';
-      if (aria === 'locality' || aria === 'locality name' || aria === 'localidad') return 'origin';
-      if (aria === 'paleo context' || aria === 'contexto paleo') return 'paleoContext';
-      if (aria === 'preparer' || aria === 'prepared by' || aria === 'preparador') return 'creator';
-      if (aria === 'collector' || aria === 'cataloger' || aria === 'determiner' || aria === 'colector' || aria === 'catalogador' || aria === 'determinador') return 'creator';
-    }
-
-    const title = (input.getAttribute('title') || '').toLowerCase();
-    const fs = input.closest('fieldset');
-    const heading = fs ? (fs.querySelector('h3, h4, legend')?.textContent || '').toLowerCase() : '';
-
-    if (title.includes('locality name') || title.includes('nombre de la localidad')) return 'origin';
-    if (title.includes('prep type') || title.includes('tipo de prep')) return 'prepType';
-    if (title.includes('prepared by') || title.includes('preparado por')) return 'creator';
-    if (title.includes('full name') && /determination|determinac/i.test(heading)) return 'taxon';
-
-    return null;
-  };
-
   App.findValueInCapturedData = function(input) {
     if (!App.lastCapturedData) return null;
-    
-    const fieldKey = App.findFieldKey(input);
+
     const labelText = App.getInputLabelText(input);
     const keys = Object.keys(App.lastCapturedData);
 
