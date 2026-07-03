@@ -139,7 +139,17 @@
     let fillCount = 0;
     for (const cand of assignments) {
       try {
-        const strValue = cand.value.toString();
+        let strValue = cand.value.toString();
+
+        // Agent pickers (collector, determiner, cataloger, …) match existing
+        // agents by their formatted name. Feeding a "Last, First" string often
+        // fails to match a stored agent, so the picker only offers "Add" and the
+        // existing agent is never suggested. Type the last-name search key so
+        // existing agents surface for selection.
+        if (App.isAgentInput(cand.input)) {
+          strValue = App.agentSearchKey(strValue);
+        }
+
         await App.setSafeValue(cand.input, strValue);
         fillCount++;
 
