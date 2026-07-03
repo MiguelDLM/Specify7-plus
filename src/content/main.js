@@ -2,6 +2,11 @@
   'use strict';
 
   App.isSpecifyReferenceForm = function(root = document) {
+    // The query builder can contain the same field names (title/publisher/
+    // ReferenceWorkType) as search criteria — never treat a query page as a
+    // data-entry form, or the import buttons leak into the query toolbar.
+    if (App.isSpecifyQueryPage()) return false;
+
     const modalHeader = App.scopedAll(root, 'h2[id*="modal"][id*="header"]')
       .find(h => h.textContent.includes('Reference Work'));
     if (modalHeader) return true;
@@ -10,6 +15,9 @@
       .find(h => /Reference Work/i.test(h.textContent));
     if (dialogHeader) return true;
 
+    // Require the full trio of data-entry fields together. A lone title/
+    // publisher input shows up in other contexts; all three only co-occur on the
+    // actual Reference Work form.
     const titleField = App.scopedFirst(root, 'input[name="title"]');
     const publisherField = App.scopedFirst(root, 'input[name="publisher"]');
     const typeSelect = App.scopedFirst(root, 'select[name="ReferenceWorkType"]');
@@ -18,8 +26,11 @@
   };
 
   App.isSpecifyCollectionObjectForm = function(root = document) {
-    const headers = App.scopedAll(root, 'h2');
-    if (headers.some(h2 => h2.textContent.includes('Collection Object'))) return true;
+    // Only the Collection Object data-entry form should get the Import JSON
+    // button. Query pages carry a catalogNumber filter input and list/tree
+    // views can show a "Collection Object" heading, so neither signal alone is
+    // enough — exclude query pages and require an actual catalogNumber field.
+    if (App.isSpecifyQueryPage()) return false;
 
     const catNumField = App.scopedFirst(root, 'input[name="catalogNumber"]');
     return !!catNumField;
