@@ -137,14 +137,14 @@
 
       const specifyData = {
         type: App.mapCrossrefType(item.type),
-        title: (item.title && item.title[0]) || '',
-        publisher: item.publisher || '',
-        placeOfPublication: (item['publisher-location']) || '',
+        title: App.cleanCrossrefText(item.title && item.title[0]),
+        publisher: App.cleanCrossrefText(item.publisher),
+        placeOfPublication: App.cleanCrossrefText(item['publisher-location']),
         workDate: (item.issued && item.issued['date-parts'] && item.issued['date-parts'][0] && item.issued['date-parts'][0][0]) || '',
         volume: item.volume || '',
         pages: item.page || '',
-        journal: (item['container-title'] && item['container-title'][0]) || '',
-        libraryNumber: item.DOI || item.ISBN && item.ISBN[0] || '',
+        journal: App.cleanCrossrefText(item['container-title'] && item['container-title'][0]),
+        libraryNumber: item.DOI || (item.ISBN && item.ISBN[0]) || '',
         authors: App.parseCrossrefAuthors(item.author || [])
       };
 
@@ -154,6 +154,25 @@
       console.error('Error fetching DOI metadata:', err);
       App.showMessage('Error fetching DOI metadata: ' + err.message, 'error');
     }
+  };
+
+  // CrossRef titles/journal names frequently arrive with inline markup
+  // (`<i>`, `<sub>`, `<scp>`) and XML/HTML entities (&amp;, &#x2013;). Left as-is
+  // this markup lands in the Specify field verbatim, and stray entities could
+  // make a title look garbled — strip tags and decode entities to plain text.
+  App.cleanCrossrefText = function(value) {
+    if (value == null) return '';
+    let str = value.toString();
+    str = str.replace(/<[^>]+>/g, '');
+    str = str
+      .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;/gi, "'")
+      .replace(/&amp;/gi, '&');
+    return str.replace(/\s+/g, ' ').trim();
   };
 
   App.mapCrossrefType = function(crossrefType) {
@@ -180,17 +199,15 @@
   };
 
   App.fillForm = async function(data) {
+    // Set the reference type first so the form settles into its final shape
+    // before we write the text fields. Choosing a type re-renders the Reference
+    // Work form asynchronously in Specify; setting it up front (and giving the
+    // re-render a moment) avoids the type change later wiping fields we just set.
     const typeSelect = document.querySelector('select[name="ReferenceWorkType"]');
     if (typeSelect && data.type !== undefined) {
-      try {
-        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-        if (nativeSetter) nativeSetter.call(typeSelect, String(data.type));
-        else typeSelect.value = data.type;
-      } catch(e) { typeSelect.value = data.type; }
-      typeSelect.dispatchEvent(new Event('input', { bubbles: true }));
-      typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      App.setSelectValue(typeSelect, data.type);
       typeSelect.classList.remove('not-touched');
-      await App.sleep(100);
+      await App.sleep(250);
     }
 
     const fieldMapping = {
@@ -203,21 +220,35 @@
       'libraryNumber': data.libraryNumber
     };
 
-    for (const [fieldName, value] of Object.entries(fieldMapping)) {
-      if (value) {
+    // Write every field with data, then verify. A late re-render can replace an
+    // input right after we filled it (this is why the title sometimes came out
+    // blank), so we re-apply any field that is still empty across a few passes
+    // with a short delay, and stop as soon as everything with data is present.
+    for (let pass = 0; pass < 4; pass++) {
+      for (const [fieldName, value] of Object.entries(fieldMapping)) {
+        if (!value) continue;
         const input = document.querySelector(`input[name="${fieldName}"]`);
-        if (input) {
+        if (input && !input.value) {
           await App.setSafeValue(input, value);
         }
       }
+
+      const allFilled = Object.entries(fieldMapping).every(([fieldName, value]) => {
+        if (!value) return true;
+        const input = document.querySelector(`input[name="${fieldName}"]`);
+        return input && input.value;
+      });
+      if (allFilled) break;
+      await App.sleep(300);
     }
 
     if (data.journal) {
-      const journalInput = document.querySelector('input[role="combobox"][title*="Journal"]') ||
-                           document.querySelector('input[role="combobox"][title*="journal"]');
+      const journalInput = await App.waitForJournalInput();
       if (journalInput) {
         await App.setSafeValue(journalInput, data.journal);
         App.watchTreeFieldClearing(journalInput, data.journal);
+      } else {
+        App.showMessage(`Journal "${data.journal}" must be set manually.`, 'info');
       }
     }
 
@@ -369,14 +400,22 @@
       const input = comboboxes[i];
       const author = authors[i];
 
-      const last = author.lastName || '';
-      const first = author.firstName || '';
+      const last = (author.lastName || '').trim();
+      const first = (author.firstName || '').trim();
       const display = last && first ? `${last}, ${first}` : (last || first);
 
-      if (display && input) {
-        await App.setSafeValue(input, display);
+      // Type the last name as the autocomplete search key, not the full
+      // "Last, First" string. Specify's agent picker matches existing agents by
+      // their formatted name, and the over-specific string frequently failed to
+      // match a stored agent — so the picker only offered "Add" and every author
+      // looked new. The full name is still remembered so a create-agent dialog
+      // (if the user does create one) is pre-filled correctly.
+      const searchKey = App.agentSearchKey(display) || last || first;
+
+      if (searchKey && input) {
+        await App.setSafeValue(input, searchKey);
         App.rememberAuthorIntent(author, display);
-        App.watchTreeFieldClearing(input, display);
+        App.watchTreeFieldClearing(input, searchKey);
       }
     }
   };
